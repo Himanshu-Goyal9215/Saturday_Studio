@@ -20,7 +20,12 @@ export interface LocalScoutReport {
   usedFallback: boolean;
 }
 
-const SUBAGENT_MODELS = ["gemini-4-hydrogen", "gemini-3.8-flash", "gemini-2.5-flash"];
+const SUBAGENT_MODELS = [
+  "gemini-4-hydrogen",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash",
+];
 const GROQ_SUBAGENT_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
 
 export async function runLocalVibeResearchSubagent(params: {
@@ -37,7 +42,13 @@ export async function runLocalVibeResearchSubagent(params: {
   candidatePlaces: PlaceCandidate[];
   wikiHighlights: Array<{ title: string; distMeters: number; url: string }>;
 }): Promise<LocalScoutReport> {
-  const ai = new GoogleGenAI({ apiKey: params.apiKey });
+  const ai = new GoogleGenAI({
+    apiKey: params.apiKey,
+    httpOptions: {
+      timeout: 15000,
+      retryOptions: { attempts: 1 },
+    },
+  });
 
   const candidateSummary = params.candidatePlaces.slice(0, 12).map((p) => ({
     name: p.name,
@@ -91,14 +102,17 @@ Keep hiddenGemIdeas to 2-3 high-signal local ideas (especially for music, live a
 
   for (const model of params.apiKey ? SUBAGENT_MODELS : []) {
     try {
-      const interaction = await ai.interactions.create({
-        model,
-        store: false,
-        input: prompt,
-        generation_config: {
-          thinking_level: "low",
+      const interaction = await ai.interactions.create(
+        {
+          model,
+          store: false,
+          input: prompt,
+          generation_config: {
+            thinking_level: "low",
+          },
         },
-      });
+        { maxRetries: 0 },
+      );
 
       const raw = (interaction.output_text || "").trim();
       const jsonMatch = raw.match(/\{[\s\S]*\}/);

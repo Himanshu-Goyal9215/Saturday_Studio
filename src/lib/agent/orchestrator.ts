@@ -18,6 +18,7 @@ import { runGroqPlannerFallback } from "./groq-fallback";
 const MODEL_CANDIDATES = [
   process.env.GEMINI_MODEL || "gemini-4-hydrogen",
   "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
 ].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
 
@@ -150,7 +151,13 @@ export async function runPlannerAgentStream(params: {
     );
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      timeout: 25000,
+      retryOptions: { attempts: 1 },
+    },
+  });
 
   const history: Interactions.Step[] = messages
     .filter((m) => m.content.trim().length > 0)
@@ -188,22 +195,25 @@ export async function runPlannerAgentStream(params: {
         });
 
         const useThinking = !model.includes("2.5");
-        const stream = await ai.interactions.create({
-          model,
-          store: false,
-          system_instruction: systemInstruction,
-          input: history,
-          tools: PLANNER_TOOL_DECLARATIONS,
-          stream: true,
-          generation_config: useThinking
-            ? {
-                thinking_summaries: "auto",
-                thinking_level: "low",
-              }
-            : {
-                thinking_summaries: "auto",
-              },
-        });
+        const stream = await ai.interactions.create(
+          {
+            model,
+            store: false,
+            system_instruction: systemInstruction,
+            input: history,
+            tools: PLANNER_TOOL_DECLARATIONS,
+            stream: true,
+            generation_config: useThinking
+              ? {
+                  thinking_summaries: "auto",
+                  thinking_level: "low",
+                }
+              : {
+                  thinking_summaries: "auto",
+                },
+          },
+          { maxRetries: 0 },
+        );
 
         for await (const event of stream) {
           if (event.event_type === "step.start") {
