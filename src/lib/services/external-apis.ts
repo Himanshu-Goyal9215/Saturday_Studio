@@ -222,7 +222,7 @@ async function runOverpassQuery(query: string): Promise<OsmElement[]> {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: `data=${encodeURIComponent(query)}`,
         },
-        7500,
+        4500,
       );
       if (!res.ok) {
         throw new Error(`Overpass ${endpoint} HTTP ${res.status}`);
@@ -304,16 +304,16 @@ export async function queryActivityPlaces(params: {
   usedFallback: boolean;
   note: string;
 }> {
-  const radius = 5500;
+  const radius = 3200;
   const query = `
-[out:json][timeout:10];
+[out:json][timeout:4];
 (
   nwr["leisure"~"park|garden|nature_reserve"](around:${radius},${params.lat},${params.lon});
-  nwr["tourism"~"museum|gallery|viewpoint|attraction"](around:${radius},${params.lat},${params.lon});
+  nwr["tourism"~"museum|gallery|viewpoint"](around:${radius},${params.lat},${params.lon});
   nwr["amenity"~"arts_centre|music_venue|theatre|library"](around:${radius},${params.lat},${params.lon});
   nwr["shop"="books"](around:${radius},${params.lat},${params.lon});
 );
-out center 45;
+out center 30;
 `.trim();
 
   try {
@@ -476,21 +476,21 @@ export async function queryFoodPlaces(params: {
     (c) => c.includes("crowd") || c.includes("quiet"),
   );
 
-  const radius = 5000;
+  const radius = 2800;
   // Query vegetarian-tagged places + cafes/restaurants so we have real options even when OSM diet tags are sparse
   const dietFilter = wantsVegan
-    ? `nwr["amenity"~"restaurant|cafe"]["diet:vegan"~"yes|only"](around:${radius},${params.lat},${params.lon});`
+    ? `node["amenity"~"restaurant|cafe"]["diet:vegan"~"yes|only"](around:${radius},${params.lat},${params.lon});`
     : wantsVeg
-      ? `nwr["amenity"~"restaurant|cafe"]["diet:vegetarian"~"yes|only"](around:${radius},${params.lat},${params.lon});`
+      ? `node["amenity"~"restaurant|cafe"]["diet:vegetarian"~"yes|only"](around:${radius},${params.lat},${params.lon});`
       : "";
 
   const query = `
-[out:json][timeout:10];
+[out:json][timeout:4];
 (
   ${dietFilter}
-  nwr["amenity"~"cafe|restaurant"](around:${radius},${params.lat},${params.lon});
+  node["amenity"~"cafe|restaurant"](around:${radius},${params.lat},${params.lon});
 );
-out center 50;
+out 30;
 `.trim();
 
   try {

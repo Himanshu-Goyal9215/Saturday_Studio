@@ -174,10 +174,12 @@ export async function runPlannerAgentStream(params: {
     );
 
   let activeModelIdx = 0;
+  let previousInteractionId: string | undefined = undefined;
+  let nextInput: Interactions.Step[] = history;
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    let completedSteps: Interactions.Step[] = [];
-    const fallbackCallsMap = new Map<
+    let interactionIdForTurn: string | undefined = undefined;
+    const callsMap = new Map<
       number,
       { id: string; name: string; rawArgs: string }
     >();
@@ -195,31 +197,34 @@ export async function runPlannerAgentStream(params: {
         });
 
         const useThinking = !model.includes("2.5");
-        const stream = await ai.interactions.create(
-          {
-            model,
-            store: false,
-            system_instruction: systemInstruction,
-            input: history,
-            tools: PLANNER_TOOL_DECLARATIONS,
-            stream: true,
-            generation_config: useThinking
-              ? {
-                  thinking_summaries: "auto",
-                  thinking_level: "low",
-                }
-              : {
-                  thinking_summaries: "auto",
-                },
-          },
-          { maxRetries: 0 },
-        );
+        const reqParams: Interactions.InteractionCreateParams.CreateModelInteractionParamsStreaming = {
+          model,
+          store: true,
+          ...(previousInteractionId
+            ? { previous_interaction_id: previousInteractionId }
+            : {}),
+          system_instruction: systemInstruction,
+          input: nextInput,
+          tools: PLANNER_TOOL_DECLARATIONS,
+          stream: true,
+          generation_config: useThinking
+            ? {
+                thinking_summaries: "auto",
+                thinking_level: "low",
+              }
+            : {
+                thinking_summaries: "auto",
+              },
+        };
+        const stream = await ai.interactions.create(reqParams, { maxRetries: 0 });
 
         for await (const event of stream) {
-          if (event.event_type === "step.start") {
+          if (event.event_type === "interaction.created") {
+            interactionIdForTurn = event.interaction?.id || interactionIdForTurn;
+          } else if (event.event_type === "step.start") {
             const step = event.step;
             if (step.type === "function_call") {
-              fallbackCallsMap.set(event.index, {
+              callsMap.set(event.index, {
                 id: step.id || `call-${turn}-${event.index}`,
                 name: step.name || "",
                 rawArgs: "",
@@ -235,15 +240,13 @@ export async function runPlannerAgentStream(params: {
             } else if (delta.type === "text") {
               if (delta.text) emit({ type: "text_delta", delta: delta.text });
             } else if (delta.type === "arguments_delta") {
-              const entry = fallbackCallsMap.get(event.index);
+              const entry = callsMap.get(event.index);
               if (entry && delta.arguments) {
                 entry.rawArgs += delta.arguments;
               }
             }
           } else if (event.event_type === "interaction.completed") {
-            if (event.interaction?.steps?.length) {
-              completedSteps = event.interaction.steps;
-            }
+            interactionIdForTurn = event.interaction?.id || interactionIdForTurn;
           } else if (event.event_type === "error") {
             throw new Error(event.error?.message || "Gemini stream error");
           }
@@ -255,7 +258,8 @@ export async function runPlannerAgentStream(params: {
         lastErr = err;
         if (
           isModelRetryableError(err) &&
-          activeModelIdx < MODEL_CANDIDATES.length - 1
+          activeModelIdx < MODEL_CANDIDATES.length - 1 &&
+          turn === 0
         ) {
           activeModelIdx++;
           emit({
@@ -289,44 +293,25 @@ export async function runPlannerAgentStream(params: {
         : new Error("All Gemini models failed");
     }
 
-    if (completedSteps.length > 0) {
-      history.push(...completedSteps);
+    if (interactionIdForTurn) {
+      previousInteractionId = interactionIdForTurn;
     }
 
-    // Extract function calls from completed steps (or fallback accumulated deltas)
+    // Extract function calls from streamed step.start + arguments_delta
     const functionCalls: ParsedFunctionCall[] = [];
-    for (const step of completedSteps) {
-      if (step.type === "function_call" && step.name && step.id) {
-        functionCalls.push({
-          id: step.id,
-          name: step.name,
-          arguments:
-            (step.arguments as Record<string, unknown> | undefined) || {},
-        });
+    for (const entry of callsMap.values()) {
+      if (!entry.name) continue;
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = entry.rawArgs ? JSON.parse(entry.rawArgs) : {};
+      } catch {
+        parsedArgs = {};
       }
-    }
-
-    if (functionCalls.length === 0 && fallbackCallsMap.size > 0) {
-      for (const entry of fallbackCallsMap.values()) {
-        if (!entry.name) continue;
-        let parsedArgs: Record<string, unknown> = {};
-        try {
-          parsedArgs = entry.rawArgs ? JSON.parse(entry.rawArgs) : {};
-        } catch {
-          parsedArgs = {};
-        }
-        functionCalls.push({
-          id: entry.id,
-          name: entry.name,
-          arguments: parsedArgs,
-        });
-        history.push({
-          type: "function_call",
-          id: entry.id,
-          name: entry.name,
-          arguments: parsedArgs,
-        });
-      }
+      functionCalls.push({
+        id: entry.id,
+        name: entry.name,
+        arguments: parsedArgs,
+      });
     }
 
     if (functionCalls.length === 0) {
@@ -348,6 +333,7 @@ export async function runPlannerAgentStream(params: {
       return rank(a.name) - rank(b.name);
     });
 
+    const functionResultsForNextTurn: Interactions.Step[] = [];
     for (const fc of orderedCalls) {
       const traceId = fc.id;
       const traceStart: ToolTraceItem = {
@@ -405,13 +391,15 @@ export async function runPlannerAgentStream(params: {
         emit({ type: "plan_updated", plan: outcome.planUpdated });
       }
 
-      history.push({
+      functionResultsForNextTurn.push({
         type: "function_result",
         name: fc.name,
         call_id: fc.id,
         result: [{ type: "text", text: JSON.stringify(outcome.result) }],
       });
     }
+
+    nextInput = functionResultsForNextTurn;
   }
 
   emit({
