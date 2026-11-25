@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { runPlannerAgentStream } from "@/lib/agent/orchestrator";
+import { formatAgentError, runPlannerAgentStream } from "@/lib/agent/orchestrator";
 import { ClientChatMessage, SaturdayPlan, StreamEvent, UserPreferences } from "@/types/planner";
 
 export const maxDuration = 60;
@@ -20,11 +20,12 @@ const ChatRequestSchema = z.object({
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
+  const groqApiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey && !groqApiKey) {
     return Response.json(
       {
         error:
-          "Server missing GEMINI_API_KEY. Add a free Google AI Studio key to .env.local or Vercel environment variables.",
+          "Server missing GEMINI_API_KEY (or GROQ_API_KEY). Add a free key to .env.local or Vercel environment variables.",
       },
       { status: 500 },
     );
@@ -60,6 +61,7 @@ export async function POST(req: NextRequest) {
       try {
         await runPlannerAgentStream({
           apiKey,
+          groqApiKey,
           messages: parsed.data.messages.map((m) => ({
             id: m.id,
             role: m.role,
@@ -73,10 +75,7 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         send({
           type: "error",
-          message:
-            err instanceof Error
-              ? err.message
-              : "Unexpected error while planning your Saturday.",
+          message: formatAgentError(err),
         });
         send({ type: "done" });
       } finally {

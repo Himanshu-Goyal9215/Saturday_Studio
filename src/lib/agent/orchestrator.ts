@@ -13,6 +13,7 @@ import {
   PLANNER_TOOL_DECLARATIONS,
   TOOL_LABELS,
 } from "./tools";
+import { runGroqPlannerFallback } from "./groq-fallback";
 
 const MODEL_CANDIDATES = [
   process.env.GEMINI_MODEL || "gemini-4-hydrogen",
@@ -79,8 +80,35 @@ interface ParsedFunctionCall {
   arguments: Record<string, unknown>;
 }
 
+export function formatAgentError(err: unknown): string {
+  const errObj = err as { statusCode?: number; status?: number; body?: string; message?: string };
+  const rawBody = typeof errObj?.body === "string" ? errObj.body : "";
+  const rawMsg = err instanceof Error ? err.message : String(err);
+  const combined = `${rawBody} ${rawMsg}`;
+
+  if (combined.includes("CONSUMER_SUSPENDED")) {
+    return "Your Gemini API key's Google Cloud project is suspended (403 CONSUMER_SUSPENDED). Create a fresh API key on an active project at https://aistudio.google.com/apikey (or add a free GROQ_API_KEY in .env.local as fallback).";
+  }
+  if (combined.includes("API_KEY_INVALID") || combined.includes("API key not valid")) {
+    return "Your GEMINI_API_KEY is invalid. Double-check the key in .env.local or generate a new one at https://aistudio.google.com/apikey.";
+  }
+
+  if (rawBody) {
+    try {
+      const parsed = JSON.parse(rawBody);
+      const first = Array.isArray(parsed) ? parsed[0] : parsed;
+      const apiMsg = first?.error?.message;
+      if (apiMsg) return `Gemini API (${first?.error?.code || errObj.statusCode || "error"}): ${apiMsg}`;
+    } catch {
+      // fall through
+    }
+  }
+  return rawMsg || "Unexpected error while planning your Saturday.";
+}
+
 function isModelRetryableError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  const errObj = err as { statusCode?: number; status?: number; body?: string };
+  const msg = `${errObj?.body || ""} ${err instanceof Error ? err.message : String(err)}`.toLowerCase();
   return (
     msg.includes("429") ||
     msg.includes("quota") ||
@@ -94,16 +122,35 @@ function isModelRetryableError(err: unknown): boolean {
 }
 
 export async function runPlannerAgentStream(params: {
-  apiKey: string;
+  apiKey?: string;
+  groqApiKey?: string;
   messages: ClientChatMessage[];
   preferences?: UserPreferences;
   currentPlan?: SaturdayPlan;
   emit: (event: StreamEvent) => void;
 }): Promise<void> {
-  const { apiKey, messages, preferences, currentPlan, emit } = params;
-  const ai = new GoogleGenAI({ apiKey });
+  const { apiKey, groqApiKey, messages, preferences, currentPlan, emit } = params;
   const state = createInitialSessionState(preferences, currentPlan);
   const systemInstruction = buildSystemPrompt(state);
+
+  if (!apiKey && groqApiKey) {
+    await runGroqPlannerFallback({
+      groqApiKey,
+      systemPrompt: systemInstruction,
+      messages,
+      state,
+      emit,
+    });
+    return;
+  }
+
+  if (!apiKey) {
+    throw new Error(
+      "Missing GEMINI_API_KEY (and no GROQ_API_KEY fallback set).",
+    );
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
 
   const history: Interactions.Step[] = messages
     .filter((m) => m.content.trim().length > 0)
@@ -206,6 +253,21 @@ export async function runPlannerAgentStream(params: {
             delta: `\nSwitching to fallback Gemini model (${MODEL_CANDIDATES[activeModelIdx]})...\n`,
           });
           continue;
+        }
+        if (groqApiKey && turn === 0) {
+          emit({
+            type: "thought_delta",
+            delta: "\nGemini unavailable — switching to Groq fallback...\n",
+          });
+          await runGroqPlannerFallback({
+            groqApiKey,
+            geminiApiKey: apiKey,
+            systemPrompt: systemInstruction,
+            messages,
+            state,
+            emit,
+          });
+          return;
         }
         throw err;
       }

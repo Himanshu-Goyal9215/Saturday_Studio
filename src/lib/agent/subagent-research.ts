@@ -87,7 +87,7 @@ Respond ONLY with valid JSON matching this schema:
 }
 Keep hiddenGemIdeas to 2-3 high-signal local ideas (especially for music, live acoustic cafes, or quiet corners that OpenStreetMap tags often miss). Respect all constraints strictly.`;
 
-  for (const model of SUBAGENT_MODELS) {
+  for (const model of params.apiKey ? SUBAGENT_MODELS : []) {
     try {
       const interaction = await ai.interactions.create({
         model,
