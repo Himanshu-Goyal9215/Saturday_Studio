@@ -1,0 +1,7 @@
+export async function GET() {
+  return Response.json({
+    ok: true,
+    geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    timestamp: new Date().toISOString(),
+  });
+}
