@@ -3,7 +3,6 @@ import { z } from "zod";
 import { runPlannerAgentStream } from "@/lib/agent/orchestrator";
 import { ClientChatMessage, SaturdayPlan, StreamEvent, UserPreferences } from "@/types/planner";
 
-export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const ChatRequestSchema = z.object({
