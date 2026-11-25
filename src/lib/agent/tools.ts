@@ -428,8 +428,9 @@ export async function executePlannerTool(params: {
   args: Record<string, unknown>;
   state: AgentSessionState;
   apiKey: string;
+  groqApiKey?: string;
 }): Promise<ToolExecutionOutcome> {
-  const { name, args, state, apiKey } = params;
+  const { name, args, state, apiKey, groqApiKey } = params;
 
   switch (name) {
     case "parse_user_preferences": {
@@ -685,6 +686,7 @@ export async function executePlannerTool(params: {
     case "research_local_vibe_subagent": {
       const report = await runLocalVibeResearchSubagent({
         apiKey,
+        groqApiKey,
         city: state.preferences.city || "your city",
         mood: state.preferences.mood || "relaxed and curious",
         interests: state.preferences.interests,

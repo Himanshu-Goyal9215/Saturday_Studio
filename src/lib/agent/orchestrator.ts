@@ -357,6 +357,7 @@ export async function runPlannerAgentStream(params: {
           args: fc.arguments,
           state,
           apiKey,
+          groqApiKey,
         });
       } catch (toolErr) {
         outcome = {

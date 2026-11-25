@@ -22,7 +22,12 @@ interface GroqMessage {
   name?: string;
 }
 
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MODELS = [
+  process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+  "qwen/qwen3.8-27b",
+  "openai/gpt-oss-20b",
+].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
+
 const MAX_TOOL_TURNS = 10;
 
 export async function runGroqPlannerFallback(params: {
@@ -34,12 +39,6 @@ export async function runGroqPlannerFallback(params: {
   emit: (event: StreamEvent) => void;
 }): Promise<void> {
   const { groqApiKey, geminiApiKey, systemPrompt, messages, state, emit } = params;
-
-  emit({
-    type: "model_info",
-    model: `groq/${GROQ_MODEL}`,
-    fallbackFrom: "gemini",
-  });
 
   const groqMessages: GroqMessage[] = [
     { role: "system", content: systemPrompt },
@@ -60,50 +59,83 @@ export async function runGroqPlannerFallback(params: {
     },
   }));
 
+  let modelIdx = 0;
+
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    emit({
-      type: "thought_delta",
-      delta:
-        turn === 0
-          ? "Reasoning with Groq tool-calling planner...\n"
-          : `Synthesizing tool results (step ${turn + 1})...\n`,
-    });
-
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: groqMessages,
-        tools,
-        tool_choice: "auto",
-        temperature: 0.4,
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new Error(`Groq API error (${res.status}): ${errText}`);
-    }
-
-    const data = (await res.json()) as {
-      choices?: Array<{
-        message?: {
+    let msg:
+      | {
           content?: string | null;
+          reasoning?: string | null;
           tool_calls?: Array<{
             id: string;
             type: "function";
             function: { name: string; arguments: string };
           }>;
-        };
-      }>;
-    };
+        }
+      | undefined;
 
-    const msg = data.choices?.[0]?.message;
+    while (modelIdx < GROQ_MODELS.length) {
+      const model = GROQ_MODELS[modelIdx];
+      emit({
+        type: "model_info",
+        model: `groq/${model}`,
+        fallbackFrom: modelIdx === 0 ? "gemini" : GROQ_MODELS[modelIdx - 1],
+      });
+
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${groqApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: groqMessages,
+          tools,
+          tool_choice: "auto",
+          temperature: 0.4,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        if (
+          (res.status === 404 || res.status === 429 || res.status === 503) &&
+          modelIdx < GROQ_MODELS.length - 1
+        ) {
+          modelIdx++;
+          emit({
+            type: "thought_delta",
+            delta: `Switching Groq model to ${GROQ_MODELS[modelIdx]}...\n`,
+          });
+          continue;
+        }
+        throw new Error(`Groq API error (${res.status}): ${errText}`);
+      }
+
+      const data = (await res.json()) as {
+        choices?: Array<{
+          message?: {
+            content?: string | null;
+            reasoning?: string | null;
+            tool_calls?: Array<{
+              id: string;
+              type: "function";
+              function: { name: string; arguments: string };
+            }>;
+          };
+        }>;
+      };
+
+      msg = data.choices?.[0]?.message;
+      break;
+    }
+
     if (!msg) throw new Error("Groq returned an empty response.");
+
+    if (msg.reasoning && msg.reasoning.trim()) {
+      emit({ type: "thought_delta", delta: `${msg.reasoning.trim()}\n\n` });
+    }
 
     const toolCalls = msg.tool_calls || [];
     groqMessages.push({
@@ -145,6 +177,7 @@ export async function runGroqPlannerFallback(params: {
           args,
           state,
           apiKey: geminiApiKey || "",
+          groqApiKey,
         });
       } catch (toolErr) {
         outcome = {
