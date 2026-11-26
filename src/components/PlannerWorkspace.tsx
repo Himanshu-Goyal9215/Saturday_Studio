@@ -38,6 +38,11 @@ const STARTER_PROMPTS = [
     prompt: "Hey! Help me plan a fun Saturday.",
   },
   {
+    label: "Gurgaon chill · ₹1800",
+    prompt:
+      "I'm in Gurgaon with ₹1800 and 4 hours on Saturday afternoon. Feeling a bit tired, love photography/art, quiet walks, and vegetarian cafes — please avoid crowded malls.",
+  },
+  {
     label: "Sample Bangalore JSON",
     prompt: BITSCALE_SAMPLE_JSON,
   },
@@ -49,7 +54,7 @@ const STARTER_PROMPTS = [
   {
     label: "Test edge-case guardrail",
     prompt:
-      "Plan a Saturday in Bangalore with ₹150 budget, 2 hours total, visiting 6 museums and a luxury fine-dining steakhouse.",
+      "Plan a Saturday in Gurgaon with ₹150 budget, 2 hours total, visiting 6 museums and a luxury fine-dining steakhouse.",
   },
 ];
 

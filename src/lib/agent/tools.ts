@@ -333,6 +333,11 @@ function inferCurrencyForCityText(city: string): {
     c.includes("kolkata") ||
     c.includes("goa") ||
     c.includes("jaipur") ||
+    c.includes("gurgaon") ||
+    c.includes("gurugram") ||
+    c.includes("hisar") ||
+    c.includes("noida") ||
+    c.includes("chandigarh") ||
     c.includes("india")
   ) {
     return inferCurrencyFromCountry("IN");

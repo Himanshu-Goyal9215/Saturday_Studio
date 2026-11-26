@@ -323,6 +323,139 @@ export const CURATED_CITY_FALLBACKS: Record<string, CityFallbackBundle> = {
       },
     ],
   },
+  gurgaon: {
+    geo: {
+      city: "Gurgaon",
+      displayName: "Gurugram, Haryana, India",
+      lat: 28.4595,
+      lon: 77.0266,
+      countryCode: "IN",
+      currency: "INR",
+      currencySymbol: "₹",
+      source: "fallback",
+    },
+    activities: [
+      {
+        id: "ggn-act-museo",
+        name: "Museo Camera (Centre for the Photographic Arts)",
+        category: "museum / culture",
+        neighborhood: "DLF Phase IV",
+        lat: 28.4648,
+        lon: 77.0819,
+        address: "Shri Ganesh Mandir Marg, Sector 28, DLF Phase IV",
+        dietTags: [],
+        openingHours: "11:00–19:00",
+        estimatedCost: 300,
+        estimatedDurationMin: 75,
+        crowdLevel: "low",
+        indoorOutdoor: "indoor",
+        description:
+          "Quiet, air-conditioned contemporary photography museum & vintage camera gallery away from mall crowds.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Museo Camera", "Gurugram", 28.4648, 77.0819),
+      },
+      {
+        id: "ggn-act-leisure",
+        name: "Leisure Valley Park",
+        category: "park / walk",
+        neighborhood: "Sector 29",
+        lat: 28.4682,
+        lon: 77.0642,
+        address: "NH-8 / Sector 29, Gurugram",
+        dietTags: [],
+        openingHours: "05:30–20:30",
+        estimatedCost: 0,
+        estimatedDurationMin: 55,
+        crowdLevel: "low",
+        indoorOutdoor: "outdoor",
+        description:
+          "Wide shaded jogging & rose garden loops ideal for an unhurried stroll.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Leisure Valley Park", "Gurugram", 28.4682, 77.0642),
+      },
+      {
+        id: "ggn-act-aravalli",
+        name: "Aravalli Biodiversity Park",
+        category: "park / walk",
+        neighborhood: "DLF Phase III / MG Road Edge",
+        lat: 28.4865,
+        lon: 77.1056,
+        address: "Mehrauli-Gurgaon Rd, Gurugram",
+        dietTags: [],
+        openingHours: "06:00–18:30",
+        estimatedCost: 0,
+        estimatedDurationMin: 60,
+        crowdLevel: "low",
+        indoorOutdoor: "outdoor",
+        description:
+          "Restored native Aravalli forest trails with peaceful birdwatching paths.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Aravalli Biodiversity Park", "Gurugram", 28.4865, 77.1056),
+      },
+    ],
+    food: [
+      {
+        id: "ggn-food-roots",
+        name: "Roots — Café in the Park",
+        category: "cafe",
+        neighborhood: "Sector 29",
+        lat: 28.4659,
+        lon: 77.0677,
+        address: "Rajiv Gandhi Renewable Energy Park, Sector 29",
+        cuisine: "Vegetarian Cafe & Indian Breakfast",
+        dietTags: ["vegetarian"],
+        openingHours: "08:00–20:00",
+        estimatedCost: 550,
+        estimatedDurationMin: 55,
+        crowdLevel: "low",
+        indoorOutdoor: "hybrid",
+        description:
+          "Serene garden-park cafe with wooden decks, bun maska, poha, and great filter coffee right beside Leisure Valley.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Roots Cafe in the Park", "Gurugram", 28.4659, 77.0677),
+      },
+      {
+        id: "ggn-food-greenr",
+        name: "Greenr Cafe (32nd Avenue)",
+        category: "restaurant",
+        neighborhood: "Sector 15 Part II",
+        lat: 28.4616,
+        lon: 77.0504,
+        address: "32nd Avenue, NH-8, Sector 15 Part II",
+        cuisine: "Plant-Forward Vegetarian Cafe",
+        dietTags: ["vegetarian", "vegan"],
+        openingHours: "12:00–22:30",
+        estimatedCost: 850,
+        estimatedDurationMin: 60,
+        crowdLevel: "moderate",
+        indoorOutdoor: "indoor",
+        description:
+          "100% vegetarian/plant-based kitchen with calm indoor greenery and acoustic playlists.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Greenr Cafe 32nd Avenue", "Gurugram", 28.4616, 77.0504),
+      },
+      {
+        id: "ggn-food-hamoni",
+        name: "Hamoni: Café by the Golf Course",
+        category: "cafe",
+        neighborhood: "Sector 23",
+        lat: 28.5067,
+        lon: 77.0508,
+        address: "CK Farm, Carterpuri Village, Sector 23A",
+        cuisine: "Cafe & Continental Vegetarian Options",
+        dietTags: ["vegetarian"],
+        openingHours: "09:00–22:00",
+        estimatedCost: 750,
+        estimatedDurationMin: 60,
+        crowdLevel: "low",
+        indoorOutdoor: "hybrid",
+        description:
+          "Tucked-away leafy cafe overlooking a quiet driving range, far from CyberHub noise.",
+        source: "curated_fallback",
+        mapUrl: mapsSearchUrl("Hamoni Cafe by the Golf Course", "Gurugram", 28.5067, 77.0508),
+      },
+    ],
+  },
 };
 
 export function inferCurrencyFromCountry(countryCode: string): {
@@ -364,7 +497,11 @@ export function inferCurrencyFromCountry(countryCode: string): {
 export function getCuratedFallbackForCity(city: string): CityFallbackBundle | null {
   const normalized = city.trim().toLowerCase();
   for (const [key, bundle] of Object.entries(CURATED_CITY_FALLBACKS)) {
-    if (normalized.includes(key) || (key === "bangalore" && normalized.includes("bengaluru"))) {
+    if (
+      normalized.includes(key) ||
+      (key === "bangalore" && normalized.includes("bengaluru")) ||
+      (key === "gurgaon" && normalized.includes("gurugram"))
+    ) {
       return bundle;
     }
   }
