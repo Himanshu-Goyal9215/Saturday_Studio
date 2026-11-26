@@ -12,6 +12,7 @@ import {
   fetchWikipediaLocalHighlights,
   geocodeCity,
   haversineKm,
+  lookupPlaceCoords,
   queryActivityPlaces,
   queryFoodPlaces,
 } from "@/lib/services/external-apis";
@@ -750,7 +751,13 @@ export async function executePlannerTool(params: {
         status: report.usedFallback ? "fallback" : "success",
         sourceBadge: "Local Vibe Sub-Agent",
         summary: `Cluster: ${report.neighborhoodCluster} · ${report.hiddenGemIdeas.length} local gems scouted`,
-        result: report,
+        result: {
+          vibeStrategy: report.vibeStrategy,
+          neighborhoodCluster: report.neighborhoodCluster,
+          hiddenGemIdeas: report.hiddenGemIdeas,
+          tradeoffSummary: report.tradeoffSummary,
+          usedFallback: report.usedFallback,
+        },
       };
     }
 
@@ -760,6 +767,41 @@ export async function executePlannerTool(params: {
         : [];
       const city = state.preferences.city || "City";
       const stops = normalizeStops(rawStops, state.candidates, city);
+
+      if (state.geo) {
+        await Promise.all(
+          stops.map(async (s) => {
+            if (s.lat !== undefined && s.lon !== undefined) return;
+            const resolved = await lookupPlaceCoords(
+              s.placeName,
+              city,
+              state.geo!.lat,
+              state.geo!.lon,
+            );
+            if (resolved) {
+              s.lat = resolved.lat;
+              s.lon = resolved.lon;
+              s.mapUrl = resolved.mapUrl;
+              state.candidates.push({
+                id: s.id,
+                name: s.placeName,
+                category: s.category,
+                neighborhood: s.neighborhood,
+                lat: resolved.lat,
+                lon: resolved.lon,
+                dietTags: [],
+                estimatedCost: s.estimatedCost,
+                estimatedDurationMin: s.durationMin,
+                crowdLevel: s.crowdLevel,
+                indoorOutdoor: s.indoorOutdoor,
+                description: s.whyItFits,
+                source: s.source,
+                mapUrl: resolved.mapUrl,
+              });
+            }
+          }),
+        );
+      }
 
       const estimatedTotalCost = stops.reduce(
         (acc, s) => acc + s.estimatedCost,
@@ -792,6 +834,7 @@ export async function executePlannerTool(params: {
             const realisticMin = Math.max(8, Math.round(distKm * 4 + 5));
             transitMin = Math.max(transitMin, realisticMin);
             curr.travelFromPrevMin = transitMin;
+            curr.distanceFromPrevKm = Number(distKm.toFixed(1));
             travelNotes.push(
               `${prev.placeName} → ${curr.placeName}: ~${distKm.toFixed(1)} km (~${transitMin} min travel)`,
             );
@@ -876,6 +919,25 @@ export async function executePlannerTool(params: {
       const city = state.preferences.city || state.currentPlan?.city || "Your City";
       const stops = normalizeStops(rawStops, state.candidates, city);
 
+      if (state.geo) {
+        await Promise.all(
+          stops.map(async (s) => {
+            if (s.lat !== undefined && s.lon !== undefined) return;
+            const resolved = await lookupPlaceCoords(
+              s.placeName,
+              city,
+              state.geo!.lat,
+              state.geo!.lon,
+            );
+            if (resolved) {
+              s.lat = resolved.lat;
+              s.lon = resolved.lon;
+              s.mapUrl = resolved.mapUrl;
+            }
+          }),
+        );
+      }
+
       // Compute Haversine transit for saved stops too
       let totalMinutes = 0;
       for (let i = 0; i < stops.length; i++) {
@@ -889,6 +951,7 @@ export async function executePlannerTool(params: {
             curr.lon !== undefined
           ) {
             const distKm = haversineKm(prev.lat, prev.lon, curr.lat, curr.lon);
+            curr.distanceFromPrevKm = Number(distKm.toFixed(1));
             curr.travelFromPrevMin = Math.max(
               curr.travelFromPrevMin,
               Math.max(8, Math.round(distKm * 4 + 5)),

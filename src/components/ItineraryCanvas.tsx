@@ -345,6 +345,9 @@ export function ItineraryCanvas({
                           <div className="flex items-center gap-2 pl-4 text-[11px] text-[#7A6F63]">
                             <div className="w-px h-4 bg-[#D8D1C5]" />
                             <span className="px-2 py-0.5 rounded-full bg-[#F3EFE8] border border-[#E7E2DA] font-mono text-[10px]">
+                              {stop.distanceFromPrevKm !== undefined
+                                ? `~${stop.distanceFromPrevKm} km · `
+                                : ""}
                               ~{stop.travelFromPrevMin} min transit
                             </span>
                           </div>

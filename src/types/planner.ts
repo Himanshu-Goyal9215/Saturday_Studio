@@ -78,6 +78,7 @@ export const PlanStopSchema = z.object({
   endTime: z.string(),
   durationMin: z.number().int().positive(),
   travelFromPrevMin: z.number().int().min(0),
+  distanceFromPrevKm: z.number().min(0).optional(),
   title: z.string(),
   category: z.enum(["activity", "food", "walk", "music", "culture", "chill"]),
   placeName: z.string(),

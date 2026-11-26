@@ -229,6 +229,7 @@ interface PhotonFeature {
 
 async function queryPhotonPlaces(params: {
   queries: string[];
+  city: string;
   lat: number;
   lon: number;
   allowedValues: Set<string>;
@@ -237,8 +238,9 @@ async function queryPhotonPlaces(params: {
   const limit = params.limitPerQuery ?? 8;
   const results = await Promise.allSettled(
     params.queries.map(async (q) => {
+      const fullQuery = `${q} ${params.city}`.trim();
       const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(
-        q,
+        fullQuery,
       )}&lat=${params.lat}&lon=${params.lon}&limit=${limit}`;
       const res = await fetchWithTimeout(url, {}, 3800);
       if (!res.ok) return [];
@@ -256,11 +258,44 @@ async function queryPhotonPlaces(params: {
       if (!props?.name || !coords || coords.length < 2) continue;
       if (props.osm_value && !params.allowedValues.has(props.osm_value)) continue;
       const [lon, lat] = coords;
-      if (haversineKm(params.lat, params.lon, lat, lon) > 12) continue;
+      if (haversineKm(params.lat, params.lon, lat, lon) > 15) continue;
       features.push(f);
     }
   }
   return features;
+}
+
+export async function lookupPlaceCoords(
+  placeName: string,
+  city: string,
+  cityLat: number,
+  cityLon: number,
+): Promise<{ lat: number; lon: number; mapUrl: string } | null> {
+  try {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(
+      `${placeName} ${city}`,
+    )}&lat=${cityLat}&lon=${cityLon}&limit=3`;
+    const res = await fetchWithTimeout(url, {}, 2500);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { features?: PhotonFeature[] };
+    for (const f of data.features || []) {
+      const coords = f.geometry?.coordinates;
+      if (!coords || coords.length < 2) continue;
+      const [lon, lat] = coords;
+      if (haversineKm(cityLat, cityLon, lat, lon) <= 20) {
+        return {
+          lat,
+          lon,
+          mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${placeName}, ${city}`,
+          )}&center=${lat},${lon}`,
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function runOverpassQuery(query: string): Promise<OsmElement[]> {
@@ -384,6 +419,7 @@ export async function queryActivityPlaces(params: {
   try {
     const photonHits = await queryPhotonPlaces({
       queries: [...interestQueries].slice(0, 4),
+      city: params.city,
       lat: params.lat,
       lon: params.lon,
       allowedValues: allowedActivityValues,
@@ -635,6 +671,7 @@ export async function queryFoodPlaces(params: {
   try {
     const photonHits = await queryPhotonPlaces({
       queries: foodQueries,
+      city: params.city,
       lat: params.lat,
       lon: params.lon,
       allowedValues: allowedFoodValues,
