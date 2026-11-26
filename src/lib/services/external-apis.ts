@@ -208,8 +208,60 @@ interface OsmElement {
 
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
 ];
+
+interface PhotonFeature {
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    osm_id?: number;
+    osm_type?: string;
+    osm_key?: string;
+    osm_value?: string;
+    name?: string;
+    street?: string;
+    housenumber?: string;
+    district?: string;
+    locality?: string;
+    city?: string;
+    suburb?: string;
+  };
+}
+
+async function queryPhotonPlaces(params: {
+  queries: string[];
+  lat: number;
+  lon: number;
+  allowedValues: Set<string>;
+  limitPerQuery?: number;
+}): Promise<PhotonFeature[]> {
+  const limit = params.limitPerQuery ?? 8;
+  const results = await Promise.allSettled(
+    params.queries.map(async (q) => {
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(
+        q,
+      )}&lat=${params.lat}&lon=${params.lon}&limit=${limit}`;
+      const res = await fetchWithTimeout(url, {}, 3800);
+      if (!res.ok) return [];
+      const data = (await res.json()) as { features?: PhotonFeature[] };
+      return data.features || [];
+    }),
+  );
+
+  const features: PhotonFeature[] = [];
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    for (const f of r.value) {
+      const props = f.properties;
+      const coords = f.geometry?.coordinates;
+      if (!props?.name || !coords || coords.length < 2) continue;
+      if (props.osm_value && !params.allowedValues.has(props.osm_value)) continue;
+      const [lon, lat] = coords;
+      if (haversineKm(params.lat, params.lon, lat, lon) > 12) continue;
+      features.push(f);
+    }
+  }
+  return features;
+}
 
 async function runOverpassQuery(query: string): Promise<OsmElement[]> {
   let lastError: Error | null = null;
@@ -304,6 +356,103 @@ export async function queryActivityPlaces(params: {
   usedFallback: boolean;
   note: string;
 }> {
+  const allowedActivityValues = new Set([
+    "park",
+    "garden",
+    "nature_reserve",
+    "museum",
+    "gallery",
+    "viewpoint",
+    "arts_centre",
+    "music_venue",
+    "theatre",
+    "library",
+    "books",
+    "artwork",
+    "attraction",
+  ]);
+
+  const interestQueries = new Set<string>(["park", "museum", "bookstore"]);
+  for (const i of params.interests) {
+    const low = i.toLowerCase();
+    if (low.includes("music")) interestQueries.add("music");
+    if (low.includes("art") || low.includes("culture")) interestQueries.add("gallery");
+    if (low.includes("walk") || low.includes("nature")) interestQueries.add("garden");
+    if (low.includes("book")) interestQueries.add("library");
+  }
+
+  try {
+    const photonHits = await queryPhotonPlaces({
+      queries: [...interestQueries].slice(0, 4),
+      lat: params.lat,
+      lon: params.lon,
+      allowedValues: allowedActivityValues,
+    });
+
+    if (photonHits.length > 0) {
+      const seen = new Set<string>();
+      const parsed: PlaceCandidate[] = [];
+      for (const f of photonHits) {
+        const p = f.properties!;
+        const name = p.name!.trim();
+        if (seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        const [lon, lat] = f.geometry!.coordinates!;
+        const val = p.osm_value || "";
+        const isParkOrView =
+          val === "park" || val === "garden" || val === "nature_reserve" || val === "viewpoint";
+        const isMusicOrArt =
+          val === "music_venue" || val === "arts_centre" || val === "theatre" || val === "gallery";
+        const isBooks = val === "books" || val === "library";
+        const category = isMusicOrArt
+          ? "music / culture"
+          : isParkOrView
+            ? "park / walk"
+            : val === "museum"
+              ? "museum / heritage"
+              : isBooks
+                ? "bookstore / chill"
+                : "local spot";
+        const crowdLevel: CrowdLevel =
+          val === "garden" || val === "library" || val === "books" || val === "gallery"
+            ? "low"
+            : "moderate";
+        const neighborhood = p.suburb || p.district || p.locality || p.street || params.city;
+        const isFree = isParkOrView || isBooks;
+
+        parsed.push({
+          id: `photon-${p.osm_type || "n"}-${p.osm_id || parsed.length}`,
+          name,
+          category,
+          neighborhood,
+          lat,
+          lon,
+          address: [p.housenumber, p.street, neighborhood].filter(Boolean).join(", ") || undefined,
+          dietTags: [],
+          estimatedCost: estimateLocalCost(params.currency, isFree ? "free" : "activity_paid"),
+          estimatedDurationMin: isParkOrView ? 60 : isBooks ? 50 : 75,
+          crowdLevel,
+          indoorOutdoor: isParkOrView ? "outdoor" : "indoor",
+          description: `${category} in ${neighborhood} (via OpenStreetMap Photon).`,
+          source: "openstreetmap",
+          mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${name}, ${params.city}`,
+          )}&center=${lat},${lon}`,
+        });
+      }
+
+      if (parsed.length > 0) {
+        return {
+          places: parsed.slice(0, 12),
+          usedFallback: false,
+          note: `Fetched ${Math.min(12, parsed.length)} real activity spots from OpenStreetMap (Photon).`,
+        };
+      }
+    }
+  } catch {
+    // Fall through to Overpass / curated fallback
+  }
+
   const radius = 3200;
   const query = `
 [out:json][timeout:4];
@@ -475,6 +624,85 @@ export async function queryFoodPlaces(params: {
   const avoidCrowds = lowerConstraints.some(
     (c) => c.includes("crowd") || c.includes("quiet"),
   );
+
+  const allowedFoodValues = new Set(["restaurant", "cafe", "bakery", "tea", "ice_cream"]);
+  const foodQueries = wantsVegan
+    ? ["vegan restaurant", "vegetarian cafe", "cafe"]
+    : wantsVeg
+      ? ["vegetarian restaurant", "vegetarian cafe", "cafe"]
+      : ["cafe", "restaurant"];
+
+  try {
+    const photonHits = await queryPhotonPlaces({
+      queries: foodQueries,
+      lat: params.lat,
+      lon: params.lon,
+      allowedValues: allowedFoodValues,
+      limitPerQuery: 10,
+    });
+
+    if (photonHits.length > 0) {
+      const seen = new Set<string>();
+      const parsed: PlaceCandidate[] = [];
+      for (const f of photonHits) {
+        const p = f.properties!;
+        const name = p.name!.trim();
+        const low = name.toLowerCase();
+        if (seen.has(low)) continue;
+        if (
+          wantsVeg &&
+          (low.includes("kfc") || low.includes("steak") || low.includes("bbq") || low.includes("seafood"))
+        ) {
+          continue;
+        }
+        seen.add(low);
+        const [lon, lat] = f.geometry!.coordinates!;
+        const isCafe = p.osm_value === "cafe" || p.osm_value === "bakery" || low.includes("cafe") || low.includes("coffee");
+        const dietTags: string[] = [];
+        if (low.includes("veg") || low.includes("plant") || low.includes("tiffin") || low.includes("udupi")) {
+          dietTags.push("vegetarian");
+        }
+        if (low.includes("vegan")) dietTags.push("vegan");
+        const crowdLevel: CrowdLevel = isCafe ? "low" : "moderate";
+        const neighborhood = p.suburb || p.district || p.locality || p.street || params.city;
+        const estCost = estimateLocalCost(params.currency, isCafe ? "cafe" : "food");
+
+        parsed.push({
+          id: `photon-food-${p.osm_type || "n"}-${p.osm_id || parsed.length}`,
+          name,
+          category: isCafe ? "cafe" : "restaurant",
+          neighborhood,
+          lat,
+          lon,
+          address: [p.housenumber, p.street, neighborhood].filter(Boolean).join(", ") || undefined,
+          cuisine: isCafe ? "Cafe & light bites" : "Local dining",
+          dietTags,
+          estimatedCost: Math.min(estCost, Math.max(estCost, params.maxMealBudget)),
+          estimatedDurationMin: isCafe ? 45 : 60,
+          crowdLevel,
+          indoorOutdoor: "indoor",
+          description: `${isCafe ? "Cafe" : "Restaurant"} in ${neighborhood}${
+            dietTags.length ? ` (${dietTags.join(", ")})` : ""
+          } (via OpenStreetMap Photon).`,
+          source: "openstreetmap",
+          mapUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+            `${name}, ${params.city}`,
+          )}&center=${lat},${lon}`,
+        });
+      }
+
+      if (parsed.length > 0) {
+        parsed.sort((a, b) => (b.dietTags.length - a.dietTags.length));
+        return {
+          places: parsed.slice(0, 12),
+          usedFallback: false,
+          note: `Fetched ${Math.min(12, parsed.length)} real food & cafe spots from OpenStreetMap (Photon).`,
+        };
+      }
+    }
+  } catch {
+    // Fall through to Overpass / curated fallback
+  }
 
   const radius = 2800;
   // Query vegetarian-tagged places + cafes/restaurants so we have real options even when OSM diet tags are sparse

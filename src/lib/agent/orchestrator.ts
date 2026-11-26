@@ -154,7 +154,7 @@ export async function runPlannerAgentStream(params: {
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
-      timeout: 25000,
+      timeout: 45000,
       retryOptions: { attempts: 1 },
     },
   });
