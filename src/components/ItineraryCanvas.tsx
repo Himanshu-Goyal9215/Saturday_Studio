@@ -6,10 +6,12 @@ import {
   Clock,
   CloudRain,
   Compass,
+  Copy,
+  Check,
   ExternalLink,
   MapPin,
   RefreshCw,
-  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Users,
@@ -69,6 +71,24 @@ function sourceLabel(src: PlanStop["source"]) {
   }
 }
 
+function formatPlanForClipboard(plan: SaturdayPlan): string {
+  const lines = [
+    `${plan.vibeHeadline} (${plan.city})`,
+    `Budget: ${plan.currencySymbol}${plan.estimatedTotalCost} / ${plan.currencySymbol}${plan.totalBudget} | Duration: ${plan.plannedHours}h`,
+    "",
+  ];
+  for (const s of plan.stops) {
+    lines.push(
+      `${s.order}. ${s.placeName} (${s.startTime}–${s.endTime}) — ${
+        s.estimatedCost === 0 ? "Free" : `${plan.currencySymbol}${s.estimatedCost}`
+      }`,
+    );
+    lines.push(`   ${s.neighborhood} · ${s.whyItFits}`);
+    if (s.mapUrl) lines.push(`   Map: ${s.mapUrl}`);
+  }
+  return lines.join("\n");
+}
+
 export function ItineraryCanvas({
   plan,
   preferences,
@@ -76,13 +96,30 @@ export function ItineraryCanvas({
   onSwapStop,
   disabled,
 }: ItineraryCanvasProps) {
-  const [activeTab, setActiveTab] = useState<"itinerary" | "trace" | "prefs">(
+  const [activeTab, setActiveTab] = useState<"itinerary" | "trace" | "brief">(
     "itinerary",
   );
+  const [copied, setCopied] = useState(false);
 
   const budgetPct = plan
-    ? Math.min(100, Math.round((plan.estimatedTotalCost / Math.max(1, plan.totalBudget)) * 100))
+    ? Math.min(
+        100,
+        Math.round(
+          (plan.estimatedTotalCost / Math.max(1, plan.totalBudget)) * 100,
+        ),
+      )
     : 0;
+
+  const handleCopyPlan = async () => {
+    if (!plan) return;
+    try {
+      await navigator.clipboard.writeText(formatPlanForClipboard(plan));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable
+    }
+  };
 
   return (
     <div className="h-full flex flex-col bg-white border border-[#E7E2DA] rounded-2xl shadow-xs overflow-hidden">
@@ -125,17 +162,37 @@ export function ItineraryCanvas({
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("prefs")}
+            onClick={() => setActiveTab("brief")}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
-              activeTab === "prefs"
+              activeTab === "brief"
                 ? "bg-[#1A1917] text-white"
                 : "text-[#5C5852] hover:bg-[#EFEAE0]"
             }`}
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            State & Guardrails
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Trip Brief
           </button>
         </div>
+
+        {plan && activeTab === "itinerary" && (
+          <button
+            type="button"
+            onClick={handleCopyPlan}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#E7E2DA] bg-white text-[11px] font-medium text-[#3A3631] hover:bg-[#EFEAE0] transition-colors cursor-pointer"
+          >
+            {copied ? (
+              <>
+                <Check className="w-3 h-3 text-emerald-600" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="w-3 h-3" />
+                Copy
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Content */}
@@ -161,15 +218,15 @@ export function ItineraryCanvas({
                       Real Places & Weather
                     </div>
                     <div className="text-[11px] text-[#665E54]">
-                      OpenStreetMap Nominatim + Overpass + Open-Meteo + Wikipedia
+                      OpenStreetMap places, live Saturday weather, and local landmarks
                     </div>
                   </div>
                   <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E7E2DA]">
                     <div className="text-[11px] font-semibold text-[#1A1917] mb-0.5">
-                      Sub-Agent & Validator
+                      Smart Checks & Trade-offs
                     </div>
                     <div className="text-[11px] text-[#665E54]">
-                      Local Vibe Scout + Haversine transit & budget checks
+                      Budget, travel-time, crowd & dietary validation before finalizing
                     </div>
                   </div>
                 </div>
@@ -393,7 +450,7 @@ export function ItineraryCanvas({
                   <div className="rounded-xl border border-[#E7E2DA] bg-[#FAF8F5] p-3 text-xs space-y-1">
                     <div className="font-semibold text-[#1A1917] flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-[#D95D39]" />
-                      Planner Validation Notes
+                      Planner Notes
                     </div>
                     <ul className="list-disc pl-4 text-[#5C5852] space-y-0.5">
                       {plan.validationNotes.map((n, i) => (
@@ -411,8 +468,8 @@ export function ItineraryCanvas({
           <div className="space-y-2.5">
             {allTraces.length === 0 ? (
               <div className="text-center py-12 text-xs text-[#665E54]">
-                No tool calls recorded yet. Send a message to inspect live Gemini
-                function-calling traces, real API latencies, and sub-agent outputs.
+                No tool calls recorded yet. Send a message to inspect live tool
+                executions, data sources, and validation checks.
               </div>
             ) : (
               allTraces.map((trace, i) => (
@@ -434,9 +491,6 @@ export function ItineraryCanvas({
                       <span className="font-semibold text-[#1A1917]">
                         {i + 1}. {trace.label}
                       </span>
-                      <code className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[#E7E2DA] text-[#5C5852]">
-                        {trace.name}
-                      </code>
                     </div>
                     <div className="flex items-center gap-1.5 font-mono text-[10px] text-[#665E54]">
                       {trace.sourceBadge && (
@@ -458,53 +512,117 @@ export function ItineraryCanvas({
           </div>
         )}
 
-        {activeTab === "prefs" && (
+        {activeTab === "brief" && (
           <div className="space-y-4 text-xs">
-            <div className="rounded-xl border border-[#E7E2DA] bg-[#FAF8F5] p-3.5 space-y-2">
-              <div className="font-semibold text-[#1A1917]">
-                Extracted User Preferences
+            <div className="rounded-xl border border-[#E7E2DA] bg-[#FAF8F5] p-4 space-y-3">
+              <div className="font-semibold text-[#1A1917] text-sm">
+                Your Saturday Trip Brief
               </div>
-              <pre className="p-3 rounded-lg bg-white border border-[#E7E2DA] font-mono text-[11px] overflow-x-auto text-[#2A2723]">
-                {JSON.stringify(
-                  preferences || {
-                    status: "Waiting for user input...",
-                  },
-                  null,
-                  2,
-                )}
-              </pre>
+
+              {!preferences?.city && !preferences?.mood && !preferences?.budget ? (
+                <p className="text-[#665E54]">
+                  As you chat with the planner, your city, budget, available time,
+                  mood, interests, and constraints will appear here automatically.
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="rounded-lg bg-white border border-[#E7E2DA] p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-0.5">
+                      City
+                    </div>
+                    <div className="font-medium text-[#1A1917]">
+                      {preferences?.city || "Not set yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-white border border-[#E7E2DA] p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-0.5">
+                      Budget
+                    </div>
+                    <div className="font-medium text-[#1A1917] font-mono">
+                      {preferences?.budget !== undefined
+                        ? `${preferences.currencySymbol}${preferences.budget}`
+                        : "Not set yet"}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-white border border-[#E7E2DA] p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-0.5">
+                      Time Window
+                    </div>
+                    <div className="font-medium text-[#1A1917]">
+                      {preferences?.availableHours
+                        ? `${preferences.availableHours} hours`
+                        : "Not set yet"}
+                      {preferences?.startTime ? ` (from ${preferences.startTime})` : ""}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-white border border-[#E7E2DA] p-2.5">
+                    <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-0.5">
+                      Mood / Energy
+                    </div>
+                    <div className="font-medium text-[#1A1917]">
+                      {preferences?.mood || "Flexible"}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {preferences?.interests && preferences.interests.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-1.5">
+                    Interests
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {preferences.interests.map((item) => (
+                      <span
+                        key={item}
+                        className="px-2.5 py-0.5 rounded-full bg-white border border-[#E7E2DA] text-[#2A2723]"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {preferences?.constraints && preferences.constraints.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#8C8377] mb-1.5">
+                    Constraints
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {preferences.constraints.map((item) => (
+                      <span
+                        key={item}
+                        className="px-2.5 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-900"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="rounded-xl border border-[#E7E2DA] bg-[#FAF8F5] p-3.5 space-y-2">
+            <div className="rounded-xl border border-[#E7E2DA] bg-[#FAF8F5] p-4 space-y-2">
               <div className="font-semibold text-[#1A1917]">
-                Active Agent Architecture & Guardrails
+                How Plans Stay Realistic
               </div>
               <ul className="space-y-1.5 text-[#5C5852] list-disc pl-4 leading-relaxed">
                 <li>
-                  <strong>Real Data First:</strong> Nominatim geocoding,
-                  Open-Meteo Saturday weather forecast, OpenStreetMap Overpass
-                  POIs, and Wikipedia GeoSearch.
+                  Checks live Saturday weather before suggesting outdoor walks or
+                  beaches.
                 </li>
                 <li>
-                  <strong>Multi-Agent Tooling:</strong> Dedicated{" "}
-                  <code>research_local_vibe_subagent</code> clusters
-                  neighborhoods and surfaces acoustic/chill spots.
+                  Calculates travel time between consecutive stops so you aren&apos;t
+                  rushing across town.
                 </li>
                 <li>
-                  <strong>Realism Validator:</strong> Enforces budget caps,
-                  Haversine travel durations, rain risk checks, and crowd/diet
-                  constraints before publishing.
+                  Enforces your dietary, crowd-level, and budget limits before
+                  publishing any plan.
                 </li>
                 <li>
-                  <strong>Graceful Fallbacks:</strong> Overpass mirror rotation +
-                  curated city fallback + Gemini model fallback chain
-                  (<code>gemini-4-hydrogen</code> →{" "}
-                  <code>gemini-3.8-flash</code> → <code>gemini-2.5-flash</code>).
-                </li>
-                <li>
-                  <strong>Scope Guardrail:</strong> Politely declines
-                  off-topic or prompt-injection requests and steers back to
-                  Saturday planning.
+                  Stays strictly focused on Saturday planning — ask follow-up
+                  questions or tweak any stop anytime.
                 </li>
               </ul>
             </div>

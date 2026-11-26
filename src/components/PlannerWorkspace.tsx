@@ -1,12 +1,10 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
-  Compass,
   RotateCcw,
   Send,
-  Sparkles,
   PanelRight,
   MessageSquare,
 } from "lucide-react";
@@ -40,11 +38,11 @@ const STARTER_PROMPTS = [
     prompt: "Hey! Help me plan a fun Saturday.",
   },
   {
-    label: "Bitscale Bangalore JSON",
+    label: "Sample Bangalore JSON",
     prompt: BITSCALE_SAMPLE_JSON,
   },
   {
-    label: "Mumbai rainy chill · ₹1500",
+    label: "Mumbai chill · ₹1500",
     prompt:
       "I'm in Mumbai with ₹1500 and 5 hours on Saturday. Feeling low-energy, love indie art, coffee, and vegetarian food, and want to avoid crowded places.",
   },
@@ -55,12 +53,27 @@ const STARTER_PROMPTS = [
   },
 ];
 
-const QUICK_EDITS = [
-  "Make this plan 25% cheaper",
-  "Swap the food spot for a quieter cafe",
-  "Less walking — I'm more tired now",
-  "Add a chill live-music or vinyl vibe",
-];
+function buildContextualFollowUps(plan: SaturdayPlan): string[] {
+  const suggestions: string[] = [];
+  const foodStop = plan.stops.find((s) => s.category === "food" || s.category === "chill");
+  if (foodStop) {
+    suggestions.push(`Swap ${foodStop.placeName} for a different vibe`);
+  }
+  if (plan.estimatedTotalCost > 0) {
+    const target = Math.max(100, Math.round(plan.estimatedTotalCost * 0.75));
+    suggestions.push(`Keep total spend under ${plan.currencySymbol}${target}`);
+  }
+  const hasOutdoor = plan.stops.some((s) => s.indoorOutdoor === "outdoor");
+  if (hasOutdoor || plan.weather?.isRainRisk) {
+    suggestions.push("Make it 100% indoor in case of rain");
+  } else {
+    suggestions.push("Add an outdoor walk or waterfront stop");
+  }
+  if (plan.stops[0]) {
+    suggestions.push(`Why did you pick ${plan.stops[0].placeName}?`);
+  }
+  return suggestions.slice(0, 4);
+}
 
 const INITIAL_ASSISTANT_MSG: ClientChatMessage = {
   id: "welcome",
@@ -79,7 +92,6 @@ export function PlannerWorkspace() {
   const [preferences, setPreferences] = useState<UserPreferences | undefined>();
   const [currentPlan, setCurrentPlan] = useState<SaturdayPlan | undefined>();
   const [allTraces, setAllTraces] = useState<ToolTraceItem[]>([]);
-  const [activeModel, setActiveModel] = useState<string>("gemini-3.5-flash-lite");
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
   const [mobileView, setMobileView] = useState<"chat" | "canvas">("chat");
 
@@ -102,6 +114,11 @@ export function PlannerWorkspace() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isStreaming]);
+
+  const contextualFollowUps = useMemo(
+    () => (currentPlan ? buildContextualFollowUps(currentPlan) : []),
+    [currentPlan],
+  );
 
   const sendMessage = async (textToSend: string) => {
     const trimmed = textToSend.trim();
@@ -174,9 +191,7 @@ export function PlannerWorkspace() {
             continue;
           }
 
-          if (ev.type === "model_info") {
-            setActiveModel(ev.model);
-          } else if (ev.type === "thought_delta") {
+          if (ev.type === "thought_delta") {
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantId
@@ -226,7 +241,7 @@ export function PlannerWorkspace() {
                       ...m,
                       content:
                         m.content ||
-                        `Sorry — I hit a snag: ${ev.message}. You can retry or check your GEMINI_API_KEY configuration.`,
+                        `Sorry — I hit a snag: ${ev.message}. Please try again.`,
                     }
                   : m,
               ),
@@ -270,22 +285,21 @@ export function PlannerWorkspace() {
     <div className="min-h-screen lg:h-screen flex flex-col bg-[#FAF8F5]">
       {/* Top Navbar */}
       <header className="shrink-0 border-b border-[#E7E2DA] bg-white/90 backdrop-blur px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-[#D95D39] text-white flex items-center justify-center shadow-xs">
-            <Compass className="w-4 h-4" />
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl overflow-hidden border border-[#E7E2DA] shadow-xs bg-[#FAF8F5] shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.jpg"
+              alt="Saturday Studio"
+              className="w-full h-full object-cover scale-125"
+            />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-semibold tracking-tight text-[#1A1917]">
-                Saturday Studio
-              </h1>
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#F3EFE8] border border-[#E7E2DA] text-[#5C5852]">
-                <Sparkles className="w-2.5 h-2.5 text-[#D95D39]" />
-                {activeModel}
-              </span>
-            </div>
+            <h1 className="text-sm sm:text-base font-semibold tracking-tight text-[#1A1917]">
+              Saturday Studio
+            </h1>
             <p className="text-[11px] text-[#665E54] hidden sm:block">
-              Real OSM places · Open-Meteo Saturday forecast · Multi-agent trace
+              Real OpenStreetMap places · Saturday weather · Conversational AI planner
             </p>
           </div>
         </div>
@@ -336,9 +350,9 @@ export function PlannerWorkspace() {
         <div className="shrink-0 bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2 flex items-center gap-2 text-xs text-amber-900">
           <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <code>GEMINI_API_KEY</code> is not configured on the server yet. Add a
-            free Google AI Studio key in <code>.env.local</code> (or Vercel
-            Environment Variables) and restart to chat.
+            No AI API key is configured on the server yet. Add{" "}
+            <code>GEMINI_API_KEY</code> or <code>OPENROUTER_API_KEY</code> in{" "}
+            <code>.env.local</code> (or Vercel Environment Variables) and restart.
           </span>
         </div>
       )}
@@ -363,24 +377,32 @@ export function PlannerWorkspace() {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Starter or Refinement Chips */}
+          {/* Starter or Contextual Follow-Up Suggestions */}
           <div className="shrink-0 px-3 pt-2.5 pb-1.5 border-t border-[#ECE7DF] bg-white">
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              {(currentPlan ? QUICK_EDITS : STARTER_PROMPTS).map((item) => {
-                const label = typeof item === "string" ? item : item.label;
-                const prompt = typeof item === "string" ? item : item.prompt;
-                return (
-                  <button
-                    key={label}
-                    type="button"
-                    disabled={isStreaming}
-                    onClick={() => sendMessage(prompt)}
-                    className="shrink-0 px-2.5 py-1 rounded-full border border-[#E7E2DA] bg-[#FAF8F5] hover:bg-[#EFEAE0] text-[11px] font-medium text-[#3A3631] transition-colors disabled:opacity-50 cursor-pointer"
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+              {currentPlan
+                ? contextualFollowUps.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      disabled={isStreaming}
+                      onClick={() => sendMessage(prompt)}
+                      className="shrink-0 px-2.5 py-1 rounded-full border border-[#E7E2DA] bg-[#FAF8F5] hover:bg-[#EFEAE0] text-[11px] font-medium text-[#3A3631] transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {prompt}
+                    </button>
+                  ))
+                : STARTER_PROMPTS.map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      disabled={isStreaming}
+                      onClick={() => sendMessage(item.prompt)}
+                      className="shrink-0 px-2.5 py-1 rounded-full border border-[#E7E2DA] bg-[#FAF8F5] hover:bg-[#EFEAE0] text-[11px] font-medium text-[#3A3631] transition-colors disabled:opacity-50 cursor-pointer"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
             </div>
           </div>
 
@@ -403,7 +425,7 @@ export function PlannerWorkspace() {
                     sendMessage(input);
                   }
                 }}
-                placeholder="Tell me your city, mood, budget & hours — or paste JSON..."
+                placeholder="Ask a question, tweak a stop, or tell me your city, mood & budget..."
                 className="flex-1 resize-none bg-transparent text-[13px] text-[#1A1917] placeholder:text-[#8C8377] focus:outline-none leading-relaxed"
               />
               <button

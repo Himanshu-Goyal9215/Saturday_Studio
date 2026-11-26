@@ -32,6 +32,30 @@ export function createInitialSessionState(
   prevPrefs?: UserPreferences,
   prevPlan?: SaturdayPlan,
 ): AgentSessionState {
+  const seededCandidates: PlaceCandidate[] = (prevPlan?.stops || [])
+    .filter((s) => s.lat !== undefined && s.lon !== undefined)
+    .map((s) => ({
+      id: s.id,
+      name: s.placeName,
+      category: s.category,
+      neighborhood: s.neighborhood,
+      lat: s.lat!,
+      lon: s.lon!,
+      address: s.address,
+      dietTags: [],
+      estimatedCost: s.estimatedCost,
+      estimatedDurationMin: s.durationMin,
+      crowdLevel: s.crowdLevel,
+      indoorOutdoor: s.indoorOutdoor,
+      description: s.whyItFits,
+      source: s.source,
+      mapUrl:
+        s.mapUrl ||
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+          `${s.placeName}, ${prevPlan?.city || ""}`,
+        )}`,
+    }));
+
   return {
     preferences: prevPrefs || {
       currency: "INR",
@@ -39,9 +63,10 @@ export function createInitialSessionState(
       interests: [],
       constraints: [],
     },
+    weather: prevPlan?.weather,
     currentPlan: prevPlan,
     wikiHighlights: [],
-    candidates: [],
+    candidates: seededCandidates,
     fallbackUsed: prevPlan?.fallbackUsed || false,
   };
 }
@@ -723,7 +748,7 @@ export async function executePlannerTool(params: {
 
       return {
         status: report.usedFallback ? "fallback" : "success",
-        sourceBadge: `Sub-Agent (${report.modelUsed})`,
+        sourceBadge: "Local Vibe Sub-Agent",
         summary: `Cluster: ${report.neighborhoodCluster} · ${report.hiddenGemIdeas.length} local gems scouted`,
         result: report,
       };

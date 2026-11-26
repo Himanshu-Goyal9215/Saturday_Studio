@@ -19,6 +19,61 @@ interface ThinkingTraceAccordionProps {
   isStreaming?: boolean;
 }
 
+function renderThoughtLine(line: string, idx: number) {
+  const tokens = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return (
+    <p key={idx} className="leading-relaxed">
+      {tokens.map((tok, i) => {
+        if (tok.startsWith("**") && tok.endsWith("**") && tok.length > 4) {
+          return (
+            <strong key={i} className="font-semibold text-[#1A1917]">
+              {tok.slice(2, -2)}
+            </strong>
+          );
+        }
+        if (tok.startsWith("`") && tok.endsWith("`") && tok.length > 2) {
+          return (
+            <code
+              key={i}
+              className="px-1 py-0.5 rounded bg-[#EFEAE0] text-[#2A2723] font-mono text-[11px]"
+            >
+              {tok.slice(1, -1)}
+            </code>
+          );
+        }
+        return <React.Fragment key={i}>{tok}</React.Fragment>;
+      })}
+    </p>
+  );
+}
+
+function FormattedThoughts({ raw }: { raw: string }) {
+  const cleanedLines = raw
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^\s*(Switching to fallback|Switching to |Gemini unavailable)/i.test(
+          line.trim(),
+        ),
+    );
+
+  const blocks: React.ReactNode[] = [];
+  cleanedLines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      blocks.push(<div key={`sp-${idx}`} className="h-1.5" />);
+      return;
+    }
+    blocks.push(renderThoughtLine(trimmed, idx));
+  });
+
+  return (
+    <div className="rounded-lg bg-white/90 border border-[#ECE7DF] p-3 text-[#4C4740] text-xs space-y-0.5">
+      {blocks}
+    </div>
+  );
+}
+
 export function ThinkingTraceAccordion({
   thoughts,
   toolCalls = [],
@@ -67,11 +122,7 @@ export function ThinkingTraceAccordion({
 
       {open && (
         <div className="border-t border-[#E7E2DA] px-3 py-2.5 space-y-2.5 bg-[#FAF8F4]">
-          {hasThoughts && (
-            <div className="rounded-lg bg-white/80 border border-[#ECE7DF] p-2.5 text-[#524D46] leading-relaxed whitespace-pre-wrap font-mono text-[11px]">
-              {thoughts}
-            </div>
-          )}
+          {hasThoughts && <FormattedThoughts raw={thoughts!} />}
 
           {hasTools && (
             <div className="space-y-1.5">

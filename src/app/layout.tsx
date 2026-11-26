@@ -4,7 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Saturday Studio — AI Saturday Planner Agent",
   description:
-    "Conversational AI Saturday planner powered by Gemini, real OpenStreetMap places, Open-Meteo weather, and transparent tool-calling traces.",
+    "Conversational AI Saturday planner powered by real OpenStreetMap places, Saturday weather forecasts, and transparent tool-calling traces.",
+  icons: {
+    icon: "/logo.jpg",
+  },
 };
 
 export default function RootLayout({

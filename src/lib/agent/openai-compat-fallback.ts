@@ -154,11 +154,6 @@ export async function runOpenAICompatPlanner(params: {
           endpointIdx < endpoints.length - 1
         ) {
           endpointIdx++;
-          const next = endpoints[endpointIdx];
-          emit({
-            type: "thought_delta",
-            delta: `Switching to ${next.cfg.provider}/${next.model}...\n`,
-          });
           continue;
         }
         throw new Error(`${cfg.provider} API error (${res.status}): ${errText}`);
