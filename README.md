@@ -58,6 +58,10 @@ src/
    ```
    ```env
    GEMINI_API_KEY=your_gemini_api_key_here
+   # Optional paid/credit fallback (prevents free-tier rate limits):
+   # OPENROUTER_API_KEY=sk-or-v1-...
+   # Optional secondary free fallback:
+   # GROQ_API_KEY=gsk_...
    ```
 
 3. **Start the development server:**

@@ -21,15 +21,16 @@ export interface LocalScoutReport {
 }
 
 const SUBAGENT_MODELS = [
+  "gemini-3.1-flash-lite",
   "gemini-3.5-flash-lite",
-  "gemini-2.5-flash",
   "gemini-3.8-flash",
-  "gemini-4-hydrogen",
 ];
-const GROQ_SUBAGENT_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
+const OPENROUTER_SUBAGENT_MODELS = ["google/gemini-2.5-flash", "openai/gpt-4o-mini"];
+const GROQ_SUBAGENT_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b"];
 
 export async function runLocalVibeResearchSubagent(params: {
   apiKey: string;
+  openrouterApiKey?: string;
   groqApiKey?: string;
   city: string;
   mood: string;
@@ -137,6 +138,50 @@ Keep hiddenGemIdeas to 2-3 high-signal local ideas (especially for music, live a
       };
     } catch {
       // Try next fallback model
+    }
+  }
+
+  if (params.openrouterApiKey) {
+    for (const model of OPENROUTER_SUBAGENT_MODELS) {
+      try {
+        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${params.openrouterApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.3,
+          }),
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const raw = (data.choices?.[0]?.message?.content || "").trim();
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) continue;
+        const parsed = JSON.parse(jsonMatch[0]) as Omit<
+          LocalScoutReport,
+          "modelUsed" | "usedFallback"
+        >;
+        return {
+          vibeStrategy: parsed.vibeStrategy || "Keep stops clustered with gentle pacing.",
+          neighborhoodCluster: parsed.neighborhoodCluster || params.city,
+          hiddenGemIdeas: Array.isArray(parsed.hiddenGemIdeas)
+            ? parsed.hiddenGemIdeas.slice(0, 3)
+            : [],
+          tradeoffSummary:
+            parsed.tradeoffSummary ||
+            "Balancing comfort, travel time, and budget within your Saturday window.",
+          modelUsed: `openrouter/${model}`,
+          usedFallback: false,
+        };
+      } catch {
+        // Try next OpenRouter model
+      }
     }
   }
 

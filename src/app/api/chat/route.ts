@@ -20,12 +20,13 @@ const ChatRequestSchema = z.object({
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const openrouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
   const groqApiKey = process.env.GROQ_API_KEY?.trim();
-  if (!apiKey && !groqApiKey) {
+  if (!apiKey && !openrouterApiKey && !groqApiKey) {
     return Response.json(
       {
         error:
-          "Server missing GEMINI_API_KEY (or GROQ_API_KEY). Add a free key to .env.local or Vercel environment variables.",
+          "Server missing LLM key. Add GEMINI_API_KEY, OPENROUTER_API_KEY, or GROQ_API_KEY to .env.local or Vercel environment variables.",
       },
       { status: 500 },
     );
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
       try {
         await runPlannerAgentStream({
           apiKey,
+          openrouterApiKey,
           groqApiKey,
           messages: parsed.data.messages.map((m) => ({
             id: m.id,

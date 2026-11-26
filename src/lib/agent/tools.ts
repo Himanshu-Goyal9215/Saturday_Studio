@@ -428,9 +428,23 @@ export async function executePlannerTool(params: {
   args: Record<string, unknown>;
   state: AgentSessionState;
   apiKey: string;
+  openrouterApiKey?: string;
   groqApiKey?: string;
 }): Promise<ToolExecutionOutcome> {
-  const { name, args, state, apiKey, groqApiKey } = params;
+  const { name, args, state, apiKey, openrouterApiKey, groqApiKey } = params;
+
+  const compactPlaces = (list: PlaceCandidate[]) =>
+    list.slice(0, 7).map((p) => ({
+      name: p.name,
+      category: p.category,
+      neighborhood: p.neighborhood,
+      estimatedCost: p.estimatedCost,
+      estimatedDurationMin: p.estimatedDurationMin,
+      crowdLevel: p.crowdLevel,
+      indoorOutdoor: p.indoorOutdoor,
+      ...(p.dietTags.length ? { dietTags: p.dietTags } : {}),
+      source: p.source,
+    }));
 
   switch (name) {
     case "parse_user_preferences": {
@@ -556,9 +570,16 @@ export async function executePlannerTool(params: {
           summary: `${geo.city}: ${weather.weatherLabel}, ${weather.tempMinC}–${weather.tempMaxC}°C (${weather.precipProbMax}% rain)`,
           preferencesUpdated: state.preferences,
           result: {
-            geo,
+            geo: {
+              city: geo.city,
+              currency: geo.currency,
+              currencySymbol: geo.currencySymbol,
+            },
             weather,
-            wikiHighlights,
+            wikiHighlights: wikiHighlights.slice(0, 4).map((w) => ({
+              title: w.title,
+              distMeters: w.distMeters,
+            })),
             warning,
           },
         };
@@ -619,13 +640,13 @@ export async function executePlannerTool(params: {
 
       return {
         status: res.usedFallback ? "fallback" : "success",
-        sourceBadge: res.usedFallback ? "Curated Fallback" : "OSM Overpass API",
+        sourceBadge: res.usedFallback ? "Curated Fallback" : "OpenStreetMap Live",
         summary: res.note,
         result: {
           count: res.places.length,
           usedFallback: res.usedFallback,
           note: res.note,
-          places: res.places,
+          places: compactPlaces(res.places),
         },
       };
     }
@@ -672,13 +693,13 @@ export async function executePlannerTool(params: {
 
       return {
         status: res.usedFallback ? "fallback" : "success",
-        sourceBadge: res.usedFallback ? "Curated Fallback" : "OSM Overpass API",
+        sourceBadge: res.usedFallback ? "Curated Fallback" : "OpenStreetMap Live",
         summary: res.note,
         result: {
           count: res.places.length,
           usedFallback: res.usedFallback,
           note: res.note,
-          places: res.places,
+          places: compactPlaces(res.places),
         },
       };
     }
@@ -686,6 +707,7 @@ export async function executePlannerTool(params: {
     case "research_local_vibe_subagent": {
       const report = await runLocalVibeResearchSubagent({
         apiKey,
+        openrouterApiKey,
         groqApiKey,
         city: state.preferences.city || "your city",
         mood: state.preferences.mood || "relaxed and curious",

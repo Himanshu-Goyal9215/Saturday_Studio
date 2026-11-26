@@ -13,11 +13,16 @@ import {
   PLANNER_TOOL_DECLARATIONS,
   TOOL_LABELS,
 } from "./tools";
-import { runGroqPlannerFallback } from "./groq-fallback";
+import {
+  buildGroqConfig,
+  buildOpenRouterConfig,
+  OpenAICompatProviderConfig,
+  runOpenAICompatPlanner,
+} from "./openai-compat-fallback";
 
 const MODEL_CANDIDATES = [
-  process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
-  "gemini-2.5-flash",
+  process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
   "gemini-3.8-flash",
   "gemini-4-hydrogen",
 ].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
@@ -124,18 +129,30 @@ function isModelRetryableError(err: unknown): boolean {
 
 export async function runPlannerAgentStream(params: {
   apiKey?: string;
+  openrouterApiKey?: string;
   groqApiKey?: string;
   messages: ClientChatMessage[];
   preferences?: UserPreferences;
   currentPlan?: SaturdayPlan;
   emit: (event: StreamEvent) => void;
 }): Promise<void> {
-  const { apiKey, groqApiKey, messages, preferences, currentPlan, emit } = params;
+  const { apiKey, openrouterApiKey, groqApiKey, messages, preferences, currentPlan, emit } =
+    params;
   const state = createInitialSessionState(preferences, currentPlan);
   const systemInstruction = buildSystemPrompt(state);
 
-  if (!apiKey && groqApiKey) {
-    await runGroqPlannerFallback({
+  const compatConfigs: OpenAICompatProviderConfig[] = [];
+  if (openrouterApiKey) compatConfigs.push(buildOpenRouterConfig(openrouterApiKey));
+  if (groqApiKey) compatConfigs.push(buildGroqConfig(groqApiKey));
+
+  const preferOpenRouter =
+    process.env.LLM_PROVIDER === "openrouter" && Boolean(openrouterApiKey);
+
+  if ((!apiKey || preferOpenRouter) && compatConfigs.length > 0) {
+    await runOpenAICompatPlanner({
+      configs: compatConfigs,
+      geminiApiKey: apiKey,
+      openrouterApiKey,
       groqApiKey,
       systemPrompt: systemInstruction,
       messages,
@@ -147,7 +164,7 @@ export async function runPlannerAgentStream(params: {
 
   if (!apiKey) {
     throw new Error(
-      "Missing GEMINI_API_KEY (and no GROQ_API_KEY fallback set).",
+      "Missing GEMINI_API_KEY (and no OPENROUTER_API_KEY or GROQ_API_KEY set).",
     );
   }
 
@@ -161,6 +178,7 @@ export async function runPlannerAgentStream(params: {
 
   const history: Interactions.Step[] = messages
     .filter((m) => m.content.trim().length > 0)
+    .slice(-6)
     .map((m) =>
       m.role === "user"
         ? {
@@ -268,14 +286,16 @@ export async function runPlannerAgentStream(params: {
           });
           continue;
         }
-        if (groqApiKey && turn === 0) {
+        if (compatConfigs.length > 0) {
           emit({
             type: "thought_delta",
-            delta: "\nGemini unavailable — switching to Groq fallback...\n",
+            delta: `\nGemini unavailable — switching to ${compatConfigs[0].provider} fallback...\n`,
           });
-          await runGroqPlannerFallback({
-            groqApiKey,
+          await runOpenAICompatPlanner({
+            configs: compatConfigs,
             geminiApiKey: apiKey,
+            openrouterApiKey,
+            groqApiKey,
             systemPrompt: systemInstruction,
             messages,
             state,
@@ -353,6 +373,7 @@ export async function runPlannerAgentStream(params: {
           args: fc.arguments,
           state,
           apiKey,
+          openrouterApiKey,
           groqApiKey,
         });
       } catch (toolErr) {
