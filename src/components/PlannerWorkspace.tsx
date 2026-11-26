@@ -3,10 +3,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  History,
   RotateCcw,
   Send,
   PanelRight,
   MessageSquare,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   ClientChatMessage,
@@ -88,7 +91,74 @@ const INITIAL_ASSISTANT_MSG: ClientChatMessage = {
   timestamp: "",
 };
 
+interface SavedSaturdaySession {
+  id: string;
+  title: string;
+  city?: string;
+  updatedAt: string;
+  messages: ClientChatMessage[];
+  preferences?: UserPreferences;
+  currentPlan?: SaturdayPlan;
+  allTraces: ToolTraceItem[];
+}
+
+const HISTORY_STORAGE_KEY = "saturday_studio_history_v1";
+const ACTIVE_SESSION_KEY = "saturday_studio_active_v1";
+const MAX_SAVED_SESSIONS = 15;
+
+function readSavedSessions(): SavedSaturdaySession[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SavedSaturdaySession[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedSessions(sessions: SavedSaturdaySession[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      HISTORY_STORAGE_KEY,
+      JSON.stringify(sessions.slice(0, MAX_SAVED_SESSIONS)),
+    );
+  } catch {
+    // Ignore storage quota / private mode errors
+  }
+}
+
+function deriveSessionTitle(
+  messages: ClientChatMessage[],
+  plan?: SaturdayPlan,
+  prefs?: UserPreferences,
+): string {
+  if (plan?.vibeHeadline) return plan.vibeHeadline;
+  const firstUser = messages.find((m) => m.role === "user");
+  if (firstUser) {
+    const clean = firstUser.content.replace(/\s+/g, " ").trim();
+    if (clean.startsWith("{") && prefs?.city) {
+      return `${prefs.city} Saturday Plan`;
+    }
+    return clean.length > 48 ? `${clean.slice(0, 48)}...` : clean;
+  }
+  return prefs?.city ? `${prefs.city} Saturday` : "New Saturday";
+}
+
+let clientSeq = 0;
+function createClientId(prefix: string): string {
+  clientSeq += 1;
+  return `${prefix}-${Date.now()}-${clientSeq}`;
+}
+
 export function PlannerWorkspace() {
+  const [sessionId, setSessionId] = useState<string>("session-initial");
+  const [savedSessions, setSavedSessions] = useState<SavedSaturdaySession[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
   const [messages, setMessages] = useState<ClientChatMessage[]>([
     INITIAL_ASSISTANT_MSG,
   ]);
@@ -101,11 +171,6 @@ export function PlannerWorkspace() {
   const [mobileView, setMobileView] = useState<"chat" | "canvas">("chat");
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const seqRef = useRef(0);
-  const nextId = (prefix: string) => {
-    seqRef.current += 1;
-    return `${prefix}-${seqRef.current}`;
-  };
 
   useEffect(() => {
     fetch("/api/health")
@@ -115,6 +180,58 @@ export function PlannerWorkspace() {
       })
       .catch(() => setGeminiConfigured(null));
   }, []);
+
+  // Load saved browser history once on client mount
+  useEffect(() => {
+    const sessions = readSavedSessions();
+    const activeId = window.localStorage.getItem(ACTIVE_SESSION_KEY);
+    const active = activeId ? sessions.find((s) => s.id === activeId) : undefined;
+    queueMicrotask(() => {
+      setSavedSessions(sessions);
+      if (active && active.messages.length > 0) {
+        setSessionId(active.id);
+        setMessages(active.messages);
+        setPreferences(active.preferences);
+        setCurrentPlan(active.currentPlan);
+        setAllTraces(active.allTraces || []);
+      } else {
+        setSessionId(createClientId("session"));
+      }
+      setHydrated(true);
+    });
+  }, []);
+
+  // Auto-save active session to localStorage when idle
+  useEffect(() => {
+    if (!hydrated || isStreaming) return;
+    const hasUserMessage = messages.some((m) => m.role === "user");
+    if (!hasUserMessage) return;
+
+    const updatedSession: SavedSaturdaySession = {
+      id: sessionId,
+      title: deriveSessionTitle(messages, currentPlan, preferences),
+      city: currentPlan?.city || preferences?.city,
+      updatedAt: new Date().toISOString(),
+      messages,
+      preferences,
+      currentPlan,
+      allTraces,
+    };
+
+    queueMicrotask(() => {
+      setSavedSessions((prev) => {
+        const next = [
+          updatedSession,
+          ...prev.filter((s) => s.id !== sessionId),
+        ].slice(0, MAX_SAVED_SESSIONS);
+        writeSavedSessions(next);
+        try {
+          window.localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+        } catch {}
+        return next;
+      });
+    });
+  }, [hydrated, isStreaming, sessionId, messages, preferences, currentPlan, allTraces]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -130,13 +247,13 @@ export function PlannerWorkspace() {
     if (!trimmed || isStreaming) return;
 
     const userMsg: ClientChatMessage = {
-      id: nextId("user"),
+      id: createClientId("user"),
       role: "user",
       content: trimmed,
       timestamp: "",
     };
 
-    const assistantId = nextId("assistant");
+    const assistantId = createClientId("assistant");
     const assistantMsg: ClientChatMessage = {
       id: assistantId,
       role: "assistant",
@@ -274,10 +391,45 @@ export function PlannerWorkspace() {
 
   const handleReset = () => {
     if (isStreaming) return;
+    const freshId = createClientId("session");
+    setSessionId(freshId);
     setMessages([{ ...INITIAL_ASSISTANT_MSG }]);
     setPreferences(undefined);
     setCurrentPlan(undefined);
     setAllTraces([]);
+    setHistoryOpen(false);
+    try {
+      window.localStorage.removeItem(ACTIVE_SESSION_KEY);
+    } catch {}
+  };
+
+  const handleLoadSession = (session: SavedSaturdaySession) => {
+    if (isStreaming) return;
+    setSessionId(session.id);
+    setMessages(session.messages);
+    setPreferences(session.preferences);
+    setCurrentPlan(session.currentPlan);
+    setAllTraces(session.allTraces || []);
+    setHistoryOpen(false);
+    try {
+      window.localStorage.setItem(ACTIVE_SESSION_KEY, session.id);
+    } catch {}
+  };
+
+  const handleDeleteSession = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = savedSessions.filter((s) => s.id !== id);
+    setSavedSessions(next);
+    writeSavedSessions(next);
+    if (id === sessionId) {
+      handleReset();
+    }
+  };
+
+  const handleClearAllHistory = () => {
+    setSavedSessions([]);
+    writeSavedSessions([]);
+    handleReset();
   };
 
   const handleSwapStop = (stop: PlanStop) => {
@@ -336,6 +488,97 @@ export function PlannerWorkspace() {
               <PanelRight className="w-3.5 h-3.5" />
               Plan {currentPlan ? `(${currentPlan.stops.length})` : ""}
             </button>
+          </div>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E7E2DA] bg-white text-xs font-medium text-[#3A3631] hover:bg-[#FAF8F5] cursor-pointer"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">History</span>
+              {savedSessions.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-[#F3EFE8] text-[#5C5852]">
+                  {savedSessions.length}
+                </span>
+              )}
+            </button>
+
+            {historyOpen && (
+              <div className="absolute right-0 mt-2 w-80 max-w-[90vw] rounded-2xl border border-[#E7E2DA] bg-white shadow-lg z-50 overflow-hidden">
+                <div className="px-3.5 py-2.5 border-b border-[#E7E2DA] bg-[#FAF8F5] flex items-center justify-between">
+                  <span className="text-xs font-semibold text-[#1A1917]">
+                    Saved Saturdays (Browser)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {savedSessions.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAllHistory}
+                        className="text-[11px] text-[#8C8377] hover:text-rose-600 cursor-pointer"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setHistoryOpen(false)}
+                      className="text-[#7A6F63] hover:text-[#1A1917] cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto divide-y divide-[#F1ECE3]">
+                  {savedSessions.length === 0 ? (
+                    <div className="px-4 py-6 text-center text-xs text-[#665E54]">
+                      Your chats and Saturday plans are saved automatically in this
+                      browser as you explore.
+                    </div>
+                  ) : (
+                    savedSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        onClick={() => handleLoadSession(s)}
+                        className={`px-3.5 py-2.5 flex items-start justify-between gap-2 hover:bg-[#FAF8F5] cursor-pointer ${
+                          s.id === sessionId ? "bg-[#FAF8F5]" : ""
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-[#1A1917] truncate">
+                            {s.title}
+                          </div>
+                          <div className="text-[10px] text-[#665E54] flex items-center gap-1.5 mt-0.5">
+                            {s.city && <span>{s.city}</span>}
+                            {s.currentPlan && (
+                              <>
+                                <span>·</span>
+                                <span>{s.currentPlan.stops.length} stops</span>
+                                <span>·</span>
+                                <span className="font-mono">
+                                  {s.currentPlan.currencySymbol}
+                                  {s.currentPlan.estimatedTotalCost}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteSession(s.id, e)}
+                          title="Delete saved chat"
+                          className="p-1 rounded text-[#8C8377] hover:text-rose-600 hover:bg-rose-50 shrink-0 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <button
