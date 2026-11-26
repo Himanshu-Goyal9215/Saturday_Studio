@@ -16,10 +16,10 @@ import {
 import { runGroqPlannerFallback } from "./groq-fallback";
 
 const MODEL_CANDIDATES = [
-  process.env.GEMINI_MODEL || "gemini-4-hydrogen",
-  "gemini-3.8-flash",
-  "gemini-3.5-flash-lite",
+  process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
+  "gemini-3.8-flash",
+  "gemini-4-hydrogen",
 ].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
 
 const MAX_TOOL_TURNS = 10;

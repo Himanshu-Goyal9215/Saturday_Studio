@@ -79,7 +79,7 @@ export function PlannerWorkspace() {
   const [preferences, setPreferences] = useState<UserPreferences | undefined>();
   const [currentPlan, setCurrentPlan] = useState<SaturdayPlan | undefined>();
   const [allTraces, setAllTraces] = useState<ToolTraceItem[]>([]);
-  const [activeModel, setActiveModel] = useState<string>("gemini-4-hydrogen");
+  const [activeModel, setActiveModel] = useState<string>("gemini-3.5-flash-lite");
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
   const [mobileView, setMobileView] = useState<"chat" | "canvas">("chat");
 

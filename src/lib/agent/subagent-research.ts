@@ -21,10 +21,10 @@ export interface LocalScoutReport {
 }
 
 const SUBAGENT_MODELS = [
-  "gemini-4-hydrogen",
-  "gemini-3.8-flash",
   "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
+  "gemini-3.8-flash",
+  "gemini-4-hydrogen",
 ];
 const GROQ_SUBAGENT_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
 
