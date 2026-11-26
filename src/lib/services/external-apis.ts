@@ -407,7 +407,9 @@ export async function queryActivityPlaces(params: {
     "attraction",
   ]);
 
-  const interestQueries = new Set<string>(["park", "museum", "bookstore"]);
+  const interestQueries = new Set<string>(
+    params.avoidCrowds ? ["garden", "library", "bookstore", "gallery"] : ["park", "museum", "bookstore"],
+  );
   for (const i of params.interests) {
     const low = i.toLowerCase();
     if (low.includes("music")) interestQueries.add("music");
@@ -453,6 +455,17 @@ export async function queryActivityPlaces(params: {
           val === "garden" || val === "library" || val === "books" || val === "gallery"
             ? "low"
             : "moderate";
+        const lowName = name.toLowerCase();
+        if (
+          params.avoidCrowds &&
+          (lowName.includes("mall") ||
+            lowName.includes("water park") ||
+            lowName.includes("amusement") ||
+            lowName.includes("stadium") ||
+            lowName.includes("club"))
+        ) {
+          continue;
+        }
         const neighborhood = p.suburb || p.district || p.locality || p.street || params.city;
         const isFree = isParkOrView || isBooks;
 
@@ -478,6 +491,9 @@ export async function queryActivityPlaces(params: {
       }
 
       if (parsed.length > 0) {
+        if (params.avoidCrowds) {
+          parsed.sort((a, b) => (a.crowdLevel === "low" ? -1 : 1) - (b.crowdLevel === "low" ? -1 : 1));
+        }
         return {
           places: parsed.slice(0, 12),
           usedFallback: false,
@@ -688,7 +704,9 @@ export async function queryFoodPlaces(params: {
         if (seen.has(low)) continue;
         if (
           wantsVeg &&
-          (low.includes("kfc") || low.includes("steak") || low.includes("bbq") || low.includes("seafood"))
+          /(kfc|steak|bbq|seafood|chicken|mutton|fish|meat|kebab|wings|pork|beef|non-veg|non veg|biryani)/i.test(
+            low,
+          )
         ) {
           continue;
         }
@@ -696,7 +714,11 @@ export async function queryFoodPlaces(params: {
         const [lon, lat] = f.geometry!.coordinates!;
         const isCafe = p.osm_value === "cafe" || p.osm_value === "bakery" || low.includes("cafe") || low.includes("coffee");
         const dietTags: string[] = [];
-        if (low.includes("veg") || low.includes("plant") || low.includes("tiffin") || low.includes("udupi")) {
+        if (
+          /(veg|plant|tiffin|udupi|udipi|sattvic|jain|bikaner|haldiram|sagar ratna|saravana)/i.test(
+            low,
+          )
+        ) {
           dietTags.push("vegetarian");
         }
         if (low.includes("vegan")) dietTags.push("vegan");
@@ -729,7 +751,14 @@ export async function queryFoodPlaces(params: {
       }
 
       if (parsed.length > 0) {
-        parsed.sort((a, b) => (b.dietTags.length - a.dietTags.length));
+        parsed.sort((a, b) => {
+          const dietDiff = b.dietTags.length - a.dietTags.length;
+          if (dietDiff !== 0) return dietDiff;
+          if (avoidCrowds) {
+            return (a.crowdLevel === "low" ? -1 : 1) - (b.crowdLevel === "low" ? -1 : 1);
+          }
+          return 0;
+        });
         return {
           places: parsed.slice(0, 12),
           usedFallback: false,
