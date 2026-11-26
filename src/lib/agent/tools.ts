@@ -370,6 +370,98 @@ function findMatchingCandidate(
   });
 }
 
+function parseClockMinutes(raw: string): { mins: number; is12h: boolean } | null {
+  const m = raw.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  if (!m) return null;
+  let hours = Number(m[1]);
+  const minutes = Number(m[2] || "0");
+  const meridiem = m[3]?.toLowerCase();
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes > 59) return null;
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === "pm" && hours !== 12) hours += 12;
+    if (meridiem === "am" && hours === 12) hours = 0;
+  } else if (hours > 23) {
+    return null;
+  }
+  return { mins: hours * 60 + minutes, is12h: Boolean(meridiem) };
+}
+
+function formatClockMinutes(totalMins: number, use12h: boolean): string {
+  const wrapped = ((totalMins % 1440) + 1440) % 1440;
+  const h24 = Math.floor(wrapped / 60);
+  const mins = wrapped % 60;
+  const mm = String(mins).padStart(2, "0");
+  if (!use12h) {
+    return `${String(h24).padStart(2, "0")}:${mm}`;
+  }
+  const suffix = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${mm} ${suffix}`;
+}
+
+function applyTransitAndSchedule(
+  stops: PlanStop[],
+  preferredStart?: string,
+): { totalMinutes: number; travelNotes: string[] } {
+  const travelNotes: string[] = [];
+  let totalMinutes = 0;
+
+  // Compute Haversine distances & realistic transit times first
+  for (let i = 0; i < stops.length; i++) {
+    const curr = stops[i];
+    if (i === 0) {
+      curr.travelFromPrevMin = 0;
+      curr.distanceFromPrevKm = undefined;
+    } else {
+      const prev = stops[i - 1];
+      if (
+        prev.lat !== undefined &&
+        prev.lon !== undefined &&
+        curr.lat !== undefined &&
+        curr.lon !== undefined
+      ) {
+        const distKm = haversineKm(prev.lat, prev.lon, curr.lat, curr.lon);
+        const realisticMin = Math.max(8, Math.round(distKm * 4 + 5));
+        curr.travelFromPrevMin = Math.max(curr.travelFromPrevMin, realisticMin);
+        curr.distanceFromPrevKm = Number(distKm.toFixed(1));
+        travelNotes.push(
+          `${prev.placeName} → ${curr.placeName}: ~${distKm.toFixed(1)} km (~${curr.travelFromPrevMin} min travel)`,
+        );
+        if (distKm > 12) {
+          travelNotes.push(
+            `Warning: ${distKm.toFixed(1)} km hop between ${prev.placeName} and ${curr.placeName} may feel tiring.`,
+          );
+        }
+      }
+      totalMinutes += curr.travelFromPrevMin;
+    }
+    totalMinutes += curr.durationMin;
+  }
+
+  // Reconcile clock times sequentially so transit gaps are always reflected in startTime/endTime
+  if (stops.length > 0) {
+    const firstParsed =
+      parseClockMinutes(stops[0].startTime) ||
+      (preferredStart ? parseClockMinutes(preferredStart) : null);
+
+    if (firstParsed) {
+      let cursor = firstParsed.mins;
+      const use12h = firstParsed.is12h;
+      for (let i = 0; i < stops.length; i++) {
+        if (i > 0) {
+          cursor += stops[i].travelFromPrevMin;
+        }
+        stops[i].startTime = formatClockMinutes(cursor, use12h);
+        cursor += stops[i].durationMin;
+        stops[i].endTime = formatClockMinutes(cursor, use12h);
+      }
+    }
+  }
+
+  return { totalMinutes, travelNotes };
+}
+
 function normalizeStops(
   rawStops: Array<Record<string, unknown>>,
   candidates: PlaceCandidate[],
@@ -379,9 +471,10 @@ function normalizeStops(
     const placeName = String(raw.placeName || raw.title || `Stop ${idx + 1}`);
     const match = findMatchingCandidate(placeName, candidates);
     const id = String(raw.id || match?.id || `stop-${idx + 1}`);
+    const rawMapUrl = typeof raw.mapUrl === "string" ? raw.mapUrl : "";
     const mapUrl =
-      typeof raw.mapUrl === "string" && raw.mapUrl.startsWith("http")
-        ? raw.mapUrl
+      rawMapUrl.includes("google.com/maps")
+        ? rawMapUrl
         : match?.mapUrl ||
           `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
             `${placeName}, ${city}`,
@@ -816,37 +909,10 @@ export async function executePlannerTool(params: {
             ? "slightly_over"
             : "over";
 
-      // Check transit & distance between consecutive stops
-      const travelNotes: string[] = [];
-      let totalMinutes = 0;
-      for (let i = 0; i < stops.length; i++) {
-        const curr = stops[i];
-        let transitMin = curr.travelFromPrevMin;
-        if (i > 0) {
-          const prev = stops[i - 1];
-          if (
-            prev.lat !== undefined &&
-            prev.lon !== undefined &&
-            curr.lat !== undefined &&
-            curr.lon !== undefined
-          ) {
-            const distKm = haversineKm(prev.lat, prev.lon, curr.lat, curr.lon);
-            const realisticMin = Math.max(8, Math.round(distKm * 4 + 5));
-            transitMin = Math.max(transitMin, realisticMin);
-            curr.travelFromPrevMin = transitMin;
-            curr.distanceFromPrevKm = Number(distKm.toFixed(1));
-            travelNotes.push(
-              `${prev.placeName} → ${curr.placeName}: ~${distKm.toFixed(1)} km (~${transitMin} min travel)`,
-            );
-            if (distKm > 12) {
-              travelNotes.push(
-                `Warning: ${distKm.toFixed(1)} km hop between ${prev.placeName} and ${curr.placeName} may feel tiring.`,
-              );
-            }
-          }
-        }
-        totalMinutes += curr.durationMin + (i > 0 ? transitMin : 0);
-      }
+      const { totalMinutes, travelNotes } = applyTransitAndSchedule(
+        stops,
+        state.preferences.startTime,
+      );
 
       const availableHours = state.preferences.availableHours ?? 4;
       const plannedHours = Number((totalMinutes / 60).toFixed(2));
@@ -908,6 +974,15 @@ export async function executePlannerTool(params: {
           errors,
           warnings,
           travelNotes,
+          reconciledSchedule: stops.map((s) => ({
+            order: s.order,
+            placeName: s.placeName,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            durationMin: s.durationMin,
+            travelFromPrevMin: s.travelFromPrevMin,
+            distanceFromPrevKm: s.distanceFromPrevKm,
+          })),
         },
       };
     }
@@ -938,29 +1013,10 @@ export async function executePlannerTool(params: {
         );
       }
 
-      // Compute Haversine transit for saved stops too
-      let totalMinutes = 0;
-      for (let i = 0; i < stops.length; i++) {
-        if (i > 0) {
-          const prev = stops[i - 1];
-          const curr = stops[i];
-          if (
-            prev.lat !== undefined &&
-            prev.lon !== undefined &&
-            curr.lat !== undefined &&
-            curr.lon !== undefined
-          ) {
-            const distKm = haversineKm(prev.lat, prev.lon, curr.lat, curr.lon);
-            curr.distanceFromPrevKm = Number(distKm.toFixed(1));
-            curr.travelFromPrevMin = Math.max(
-              curr.travelFromPrevMin,
-              Math.max(8, Math.round(distKm * 4 + 5)),
-            );
-          }
-          totalMinutes += curr.travelFromPrevMin;
-        }
-        totalMinutes += stops[i].durationMin;
-      }
+      const { totalMinutes } = applyTransitAndSchedule(
+        stops,
+        state.preferences.startTime,
+      );
 
       const estimatedTotalCost = stops.reduce(
         (acc, s) => acc + s.estimatedCost,
