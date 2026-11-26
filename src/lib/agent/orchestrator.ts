@@ -21,8 +21,8 @@ import {
 } from "./openai-compat-fallback";
 
 const MODEL_CANDIDATES = [
-  process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
-  "gemini-3.5-flash-lite",
+  process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
   "gemini-3.8-flash",
   "gemini-4-hydrogen",
 ].filter((v, idx, arr) => Boolean(v) && arr.indexOf(v) === idx);
@@ -171,7 +171,7 @@ export async function runPlannerAgentStream(params: {
   const ai = new GoogleGenAI({
     apiKey,
     httpOptions: {
-      timeout: 45000,
+      timeout: 22000,
       retryOptions: { attempts: 1 },
     },
   });
