@@ -6,6 +6,8 @@ export const metadata: Metadata = {
   description:
     "Conversational AI Saturday planner powered by real OpenStreetMap places, Saturday weather forecasts, and transparent tool-calling traces.",
   icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: "/icon.svg",
     apple: "/logo.jpg",
   },
 };
