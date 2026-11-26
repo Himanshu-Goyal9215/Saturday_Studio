@@ -11,13 +11,23 @@ interface ChatMessageBubbleProps {
 }
 
 function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  const pattern = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/g;
+  const tokens = text.split(pattern);
+
   return tokens.map((tok, i) => {
+    if (!tok) return null;
     if (tok.startsWith("**") && tok.endsWith("**") && tok.length > 4) {
       return (
         <strong key={i} className="font-semibold text-[#1A1917]">
           {tok.slice(2, -2)}
         </strong>
+      );
+    }
+    if (tok.startsWith("*") && tok.endsWith("*") && tok.length > 2) {
+      return (
+        <em key={i} className="italic text-[#3A3631]">
+          {tok.slice(1, -1)}
+        </em>
       );
     }
     if (tok.startsWith("`") && tok.endsWith("`") && tok.length > 2) {
@@ -30,70 +40,167 @@ function renderInlineMarkdown(text: string): React.ReactNode[] {
         </code>
       );
     }
+    const linkMatch = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a
+          key={i}
+          href={linkMatch[2]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[#D95D39] underline hover:text-[#B84827]"
+        >
+          {linkMatch[1]}
+        </a>
+      );
+    }
     return <React.Fragment key={i}>{tok}</React.Fragment>;
   });
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\s*\|?(\s*:?-{2,}:?\s*\|)+\s*:?-{2,}:?\s*\|?\s*$/.test(line);
+}
+
+function splitTableRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
 }
 
 function MarkdownText({ content }: { content: string }) {
   const lines = content.split("\n");
   const elements: React.ReactNode[] = [];
-  let listItems: string[] = [];
+  let i = 0;
 
-  const flushList = (keyPrefix: string) => {
-    if (listItems.length === 0) return;
-    elements.push(
-      <ul key={`${keyPrefix}-ul`} className="list-disc pl-4 space-y-1 my-1.5">
-        {listItems.map((item, idx) => (
-          <li key={idx} className="leading-relaxed">
-            {renderInlineMarkdown(item)}
-          </li>
-        ))}
-      </ul>,
-    );
-    listItems = [];
-  };
+  while (i < lines.length) {
+    const line = lines[i].trimEnd();
+    const trimmed = line.trim();
 
-  lines.forEach((rawLine, idx) => {
-    const line = rawLine.trimEnd();
-    const bulletMatch = line.match(/^\s*[-*]\s+(.+)$/);
-    if (bulletMatch) {
-      listItems.push(bulletMatch[1]);
-      return;
+    if (!trimmed) {
+      elements.push(<div key={`sp-${i}`} className="h-1.5" />);
+      i++;
+      continue;
     }
 
-    flushList(`l-${idx}`);
-
-    if (!line.trim()) {
-      elements.push(<div key={`sp-${idx}`} className="h-1.5" />);
-      return;
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      elements.push(<hr key={`hr-${i}`} className="my-2.5 border-[#E7E2DA]" />);
+      i++;
+      continue;
     }
 
-    if (line.startsWith("### ")) {
+    // Markdown table block
+    if (
+      trimmed.includes("|") &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      const headers = splitTableRow(trimmed);
+      i += 2; // skip header & separator
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].trim().includes("|")) {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
       elements.push(
-        <h4 key={idx} className="font-semibold text-[#1A1917] text-sm mt-2 mb-1">
-          {renderInlineMarkdown(line.slice(4))}
-        </h4>,
+        <div
+          key={`tbl-${i}`}
+          className="my-2 overflow-x-auto rounded-xl border border-[#E7E2DA] bg-[#FAF8F5]"
+        >
+          <table className="w-full border-collapse text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-[#E7E2DA] bg-[#F3EFE8] text-[#1A1917]">
+                {headers.map((h, hi) => (
+                  <th key={hi} className="px-2.5 py-2 font-semibold whitespace-nowrap">
+                    {renderInlineMarkdown(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#ECE7DF] bg-white">
+              {rows.map((row, ri) => (
+                <tr key={ri} className="hover:bg-[#FAF8F5]">
+                  {headers.map((_, ci) => (
+                    <td key={ci} className="px-2.5 py-2 align-top text-[#2A2723]">
+                      {renderInlineMarkdown(row[ci] || "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
       );
-      return;
+      continue;
     }
 
-    if (line.startsWith("## ")) {
+    // Headings (#, ##, ###, ####)
+    const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const cls =
+        level <= 2
+          ? "font-semibold text-[#1A1917] text-[14px] mt-2.5 mb-1"
+          : "font-semibold text-[#1A1917] text-[13px] mt-2 mb-0.5";
       elements.push(
-        <h3 key={idx} className="font-semibold text-[#1A1917] text-sm mt-2.5 mb-1">
-          {renderInlineMarkdown(line.slice(3))}
+        <h3 key={`h-${i}`} className={cls}>
+          {renderInlineMarkdown(headingMatch[2])}
         </h3>,
       );
-      return;
+      i++;
+      continue;
+    }
+
+    // Unordered list
+    if (/^\s*[-*•]\s+(.+)$/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^\s*[-*•]\s+(.+)$/);
+        if (!m) break;
+        items.push(m[1]);
+        i++;
+      }
+      elements.push(
+        <ul key={`ul-${i}`} className="list-disc pl-5 space-y-1 my-1.5">
+          {items.map((item, idx) => (
+            <li key={idx} className="leading-relaxed">
+              {renderInlineMarkdown(item)}
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    // Ordered list
+    if (/^\s*\d+\.\s+(.+)$/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length) {
+        const m = lines[i].match(/^\s*\d+\.\s+(.+)$/);
+        if (!m) break;
+        items.push(m[1]);
+        i++;
+      }
+      elements.push(
+        <ol key={`ol-${i}`} className="list-decimal pl-5 space-y-1 my-1.5">
+          {items.map((item, idx) => (
+            <li key={idx} className="leading-relaxed">
+              {renderInlineMarkdown(item)}
+            </li>
+          ))}
+        </ol>,
+      );
+      continue;
     }
 
     elements.push(
-      <p key={idx} className="leading-relaxed">
-        {renderInlineMarkdown(line)}
+      <p key={`p-${i}`} className="leading-relaxed">
+        {renderInlineMarkdown(trimmed)}
       </p>,
     );
-  });
+    i++;
+  }
 
-  flushList("end");
   return <div className="space-y-1 text-[13px] text-[#2A2723]">{elements}</div>;
 }
 

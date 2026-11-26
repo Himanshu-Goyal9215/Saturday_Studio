@@ -89,7 +89,7 @@ function buildSystemPrompt(state: AgentSessionState): string {
   - Fetch fresh options if needed (\`get_activity_options\` / \`get_food_options\`), re-validate with \`estimate_cost_and_validate_plan\`, and call \`save_or_update_plan\` with the updated stops.
 
 ## Response Quality
-- After \`save_or_update_plan\` succeeds, summarize the itinerary clearly in markdown:
+- After \`save_or_update_plan\` succeeds, summarize the itinerary clearly in clean markdown (use crisp numbered stop blocks with bullet points rather than wide multi-column tables):
   - Mention the Saturday weather forecast & how it shaped the plan.
   - Explain **why each stop fits** their mood/interests/constraints.
   - Explicitly highlight **honest trade-offs** (e.g. slightly over budget vs better vibe, arriving early to beat crowds, or keeping transit short because they're tired).
